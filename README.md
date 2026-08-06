@@ -20,15 +20,6 @@
 
 > 用户需要的不是一个"什么都能干的 Agent"，而是一个能按场景切换工作方式、且每种方式自己都看得懂、改得动的 Agent。
 
-模式切换在工程上 = harness 切换：提示词策略、工具集、上下文管理、UI 能力各不相同，但共享同一个核心运行时。
-
-```diff
-+ Core Engine ....... ONLINE   Node 内置模块，零 npm 依赖
-+ Sandbox ........... READY    路径越界 / 符号链接逃逸拒绝
-+ Approval Gate ..... ACTIVE   危险命令先审批，批准前绝不执行
-+ Checkpoint ........ READY    变更前自动快照，一键撤销
-+ Slash Commands .... 6 个     /goal /压缩 /clear /模式 /new /help
-```
 
 ---
 
