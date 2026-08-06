@@ -25,6 +25,7 @@ import { normalizeCharacter, validateCharacter } from './src/characters/schema.j
 import { importCcv3, exportCcv3 } from './src/characters/ccv3.js';
 import { importCharacterCardFromPng } from './src/characters/png.js';
 import { buildPack, installPack, listPacks, getPack, savePackFile, deletePack, fetchPackJson, fetchMarketIndex, PackError } from './src/characters/pack.js';
+import { listThemes, getTheme, saveTheme, deleteTheme, BUILTIN_THEMES } from './src/core/themes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
@@ -83,6 +84,7 @@ const DEFAULT_SETTINGS = {
   apiKey: '',
   model: 'gpt-4o-mini',
   temperature: 0.7,
+  theme: 'paper',
 };
 
 function loadSettings() {
@@ -834,6 +836,18 @@ const server = http.createServer(async (req, res) => {
       const settings = { ...loadSettings(), ...body };
       saveSettings(settings);
       return sendJson(res, 200, { settings });
+    }
+    if (method === 'GET' && p === '/api/themes') {
+      return sendJson(res, 200, { themes: listThemes() });
+    }
+    if (method === 'POST' && p === '/api/themes') {
+      const body = await readJson(req);
+      const theme = saveTheme(body);
+      return sendJson(res, 201, { theme });
+    }
+    if (method === 'DELETE' && p.startsWith('/api/themes/')) {
+      const id = decodeURIComponent(p.slice('/api/themes/'.length));
+      return sendJson(res, 200, deleteTheme(id));
     }
     if (p.startsWith('/api/')) {
       return sendJson(res, 404, { error: '接口不存在' });

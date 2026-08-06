@@ -42,7 +42,7 @@ test('session: switchMode 更新模式、追加提示、记录日志', () => {
   assert.equal(updated.modeLog[0].from, 'chat');
   assert.equal(updated.modeLog[0].to, 'code');
   const last = updated.messages[updated.messages.length - 1];
-  assert.equal(last.role, 'assistant');
+  assert.equal(last.role, 'notice');
   assert.match(last.content, /Code/);
   const reloaded = store.getSession(s.id);
   assert.equal(reloaded.modeId, 'code');

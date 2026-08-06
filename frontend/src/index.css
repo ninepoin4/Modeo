@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    /* 默认 = 纸张（浅色）。主题应用时由 JS 覆写同一批变量 */
     --paper: 248 246 242;
     --paper2: 239 237 232;
     --ink: 20 20 20;
@@ -12,27 +13,20 @@
     --line-soft: 230 226 218;
     --muted: 138 133 123;
     --card: 255 255 255;
+    --accent: 20 20 20;
     --noise: rgba(20, 20, 20, 0.05);
     --thumb: #c9c4ba;
-  }
-  .dark {
-    --paper: 20 20 20;
-    --paper2: 30 30 30;
-    --ink: 238 236 232;
-    --ink-soft: 205 203 196;
-    --line: 56 56 56;
-    --line-soft: 44 44 44;
-    --muted: 152 149 142;
-    --card: 38 38 38;
-    --noise: rgba(255, 255, 255, 0.045);
-    --thumb: #4a4a4a;
+    --radius: 16px;
+    --shadow-strength: 1;
+    --font-ui: SimSun, "NSimSun", "Songti SC", "Source Han Serif SC", "Noto Serif SC", STSong, Georgia, serif;
+    --font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
   }
   html, body, #root {
     height: 100%;
   }
   body {
     @apply bg-paper text-ink antialiased;
-    font-family: SimSun, "NSimSun", "Songti SC", "Source Han Serif SC", "Noto Serif SC", STSong, Georgia, serif;
+    font-family: var(--font-ui);
     font-feature-settings: "palt";
     background-image: radial-gradient(var(--noise) 1px, transparent 1px);
     background-size: 22px 22px;

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Settings as SettingsIcon, Eye, Sun, Moon, Plus, FolderDown, Undo2 } from 'lucide-react';
 import { api, streamEvents } from './api';
 import { cn } from './lib/utils';
+import { applyTheme } from './lib/theme';
 import { useToast } from './components/ui/toast';
 import { ConfirmDialog } from './components/ui/confirm';
 import { Button } from './components/ui/button';
@@ -67,7 +68,11 @@ export default function App() {
   const [streaming, setStreaming] = useState(false);
   const [pendingApproval, setPendingApproval] = useState(null);
   const [ready, setReady] = useState(false);
-  const [theme, setTheme] = useState(() => localStorage.getItem('modeo-theme') || 'light');
+  const [themes, setThemes] = useState([]);
+  const [themeId, setThemeId] = useState(() => {
+    const v = localStorage.getItem('modeo-theme') || 'light';
+    return v === 'dark' ? 'midnight' : v === 'light' ? 'paper' : v;
+  });
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const [dialog, setDialog] = useState({ settings: false, transparency: false, characterEditor: null, worldState: false });
@@ -78,27 +83,50 @@ export default function App() {
   const abortRef = useRef(null);
 
   const refreshBase = useCallback(async () => {
-    const [m, s, c, st, pl, pk] = await Promise.all([
+    const [m, s, c, st, pl, pk, th] = await Promise.all([
       api.modes(),
       api.sessions(),
       api.characters(),
       api.settings(),
       api.plugins(),
       api.packs(),
+      api.themes(),
     ]);
     setModes(m.modes);
     setSessions(s.sessions);
     setCharacters(c.characters);
     setSettings(st.settings);
-    if (st.settings?.theme) setTheme(st.settings.theme);
+    setThemes(th.themes || []);
+    const saved = st.settings?.theme;
+    if (saved) {
+      const mapped = saved === 'dark' ? 'midnight' : saved === 'light' ? 'paper' : saved;
+      setThemeId(mapped);
+    }
     setPlugins(pl.plugins || []);
     setPacks(pk.packs || []);
   }, []);
 
+  const currentTheme = themes.find((t) => t.id === themeId) || null;
+
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('modeo-theme', theme);
-  }, [theme]);
+    const t = currentTheme;
+    if (!t) return;
+    applyTheme(t);
+    localStorage.setItem('modeo-theme', t.id);
+  }, [currentTheme, themeId]);
+
+  const setThemeByName = useCallback(
+    async (id, { persist = true } = {}) => {
+      const mapped = id === 'dark' ? 'midnight' : id === 'light' ? 'paper' : id;
+      setThemeId(mapped);
+      if (persist) {
+        const updated = { ...settings, theme: mapped };
+        setSettings(updated);
+        await api.saveSettings(updated).catch(() => {});
+      }
+    },
+    [settings]
+  );
 
   useEffect(() => {
     const onKey = (e) => {
@@ -111,15 +139,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const toggleTheme = useCallback(async () => {
-    setTheme((t) => {
-      const next = t === 'dark' ? 'light' : 'dark';
-      const updated = { ...settings, theme: next };
-      setSettings(updated);
-      api.saveSettings(updated).catch(() => {});
-      return next;
-    });
-  }, [settings]);
+  const cycleTheme = useCallback(async () => {
+    if (!themes.length) return;
+    const idx = themes.findIndex((t) => t.id === themeId);
+    const next = themes[(idx + 1) % themes.length];
+    await setThemeByName(next.id);
+    toast(`主题：${next.name}`, 'success');
+  }, [themes, themeId, setThemeByName, toast]);
 
   const openSession = useCallback(async (id) => {
     const r = await api.session(id);
@@ -235,8 +261,10 @@ export default function App() {
         setMessages(r.session.messages || []);
       }
       setSelectedMode(modeId);
+      const m = modes.find((x) => x.id === modeId);
+      toast(`已切换到「${m?.name || modeId}」`, 'success');
     },
-    [selectedMode, session]
+    [selectedMode, session, modes, toast]
   );
 
   const newSession = useCallback(async () => {
@@ -372,7 +400,6 @@ export default function App() {
           return;
         }
         await switchMode(m.id);
-        toast(`已切换到「${m.name}」`, 'success');
         return;
       }
       if (commandId === 'new') {
@@ -535,7 +562,7 @@ export default function App() {
     })),
     { id: 'settings', label: '打开设置', hint: 'Ctrl+,', icon: SettingsIcon, run: () => setDialog((d) => ({ ...d, settings: true })), keywords: '设置 settings' },
     { id: 'transparency', label: '提示词透明面板', hint: 'T', icon: Eye, run: () => setDialog((d) => ({ ...d, transparency: true })), keywords: '透明 提示词 prompt' },
-    { id: 'theme', label: `切换主题（当前：${theme === 'dark' ? '深色' : '浅色'}）`, hint: 'D', icon: theme === 'dark' ? Sun : Moon, run: toggleTheme, keywords: '主题 深浅 theme dark light' },
+    { id: 'theme', label: `切换主题（当前：${currentTheme?.name || themeId}）`, hint: 'D', icon: currentTheme?.dark ? Sun : Moon, run: cycleTheme, keywords: '主题 深浅 theme dark light' },
     ...(selectedMode === 'code'
       ? [{ id: 'undo', label: '撤销到最近快照', hint: 'U', icon: Undo2, run: undo, keywords: '撤销 快照 undo' }]
       : []),
@@ -563,9 +590,9 @@ export default function App() {
             <ModeTabs modes={modes} selected={selectedMode} onSelect={switchMode} />
           </div>
           <div className="flex items-center gap-2">
-            <Tooltip content={theme === 'dark' ? '切换到浅色' : '切换到深色'}>
-              <Button size="icon" variant="ghost" data-testid="btn-theme" onClick={toggleTheme}>
-                {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            <Tooltip content={`切换主题（当前：${currentTheme?.name || themeId}）`}>
+              <Button size="icon" variant="ghost" data-testid="btn-theme" onClick={cycleTheme}>
+                {currentTheme?.dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </Button>
             </Tooltip>
             <Tooltip content="提示词透明面板">
@@ -681,6 +708,13 @@ export default function App() {
             settings={settings}
             modes={modes}
             plugins={plugins}
+            themes={themes}
+            themeId={themeId}
+            onThemeChange={setThemeByName}
+            onThemesChanged={async () => {
+              const r = await api.themes();
+              setThemes(r.themes || []);
+            }}
             onSave={(s) => setSettings(s)}
             onClose={() => setDialog((d) => ({ ...d, settings: false }))}
             onModesChanged={async () => {

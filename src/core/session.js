@@ -83,8 +83,8 @@ export function switchMode(session, modeId, modeName = modeId) {
   session.modeLog.push({ at: new Date().toISOString(), from: session.modeId, to: modeId });
   session.modeId = modeId;
   session.messages.push({
-    role: 'assistant',
-    content: `系统提示：已切换到『${modeName}』模式，系统提示词与工具已变更。`,
+    role: 'notice',
+    content: `已切换到『${modeName}』模式，系统提示词与工具已变更。`,
     id: randomUUID(),
   });
   saveSession(session);

@@ -12,14 +12,16 @@ export default {
         'line-soft': 'rgb(var(--line-soft) / <alpha-value>)',
         muted: 'rgb(var(--muted) / <alpha-value>)',
         card: 'rgb(var(--card) / <alpha-value>)',
+        accent: 'rgb(var(--accent) / <alpha-value>)',
       },
       fontFamily: {
-        serif: ['SimSun', '"NSimSun"', '"Songti SC"', '"Source Han Serif SC"', '"Noto Serif SC"', 'Georgia', 'serif'],
-        sans: ['"Inter"', '"PingFang SC"', 'system-ui', 'sans-serif'],
+        serif: ['var(--font-ui)', 'SimSun', '"NSimSun"', '"Songti SC"', '"Source Han Serif SC"', '"Noto Serif SC"', 'Georgia', 'serif'],
+        sans: ['var(--font-ui)', '"Inter"', '"PingFang SC"', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'Consolas', '"Liberation Mono"', 'monospace'],
       },
       boxShadow: {
-        paper: '0 1px 2px rgba(20,20,20,0.04), 0 8px 24px rgba(20,20,20,0.06)',
-        lift: '0 2px 4px rgba(20,20,20,0.06), 0 16px 40px rgba(20,20,20,0.10)',
+        paper: '0 1px 2px rgba(20,20,20,calc(0.04 * var(--shadow-strength, 1))), 0 8px 24px rgba(20,20,20,calc(0.06 * var(--shadow-strength, 1)))',
+        lift: '0 2px 4px rgba(20,20,20,calc(0.06 * var(--shadow-strength, 1))), 0 16px 40px rgba(20,20,20,calc(0.10 * var(--shadow-strength, 1)))',
       },
       keyframes: {
         'fade-up': {

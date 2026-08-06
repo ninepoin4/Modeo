@@ -70,6 +70,9 @@ export const api = {
   decideApproval: (id, decision) => request(`/api/approvals/${id}`, { method: 'POST', body: { decision } }),
   settings: () => request('/api/settings'),
   saveSettings: (settings) => request('/api/settings', { method: 'POST', body: settings }),
+  themes: () => request('/api/themes'),
+  saveTheme: (theme) => request('/api/themes', { method: 'POST', body: theme }),
+  deleteTheme: (id) => request(`/api/themes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };
 
 /** 读取 SSE 流，逐事件回调 */
