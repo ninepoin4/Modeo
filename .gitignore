@@ -5,6 +5,7 @@ workspaces/*/
 !workspaces/default/.gitkeep
 data/sessions/
 data/checkpoints/
+data/baselines/
 data/harness/
 data/*.json
 *.log
