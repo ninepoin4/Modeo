@@ -110,7 +110,6 @@ flowchart LR
 | 普通 Chat | ![chat](docs/screenshots/ui-chat.png) |
 | Code | ![code](docs/screenshots/ui-code.png) |
 | 角色扮演 | ![roleplay](docs/screenshots/ui-roleplay.png) |
-| 深色主题 | ![dark](docs/screenshots/ui-dark.png) |
 
 ---
 
@@ -150,15 +149,6 @@ desktop/           Electron 桌面壳
 web/               前端构建产物（服务端优先托管）
 tests/             node --test 单元测试
 docs/              项目目标 / 技术规格 / 审查清单
-```
-
-## 验证状态（v2.7，2026-08-06）
-
-```diff
-+ 单元测试 ....... 123 项全绿（node --test）
-+ API 冒烟 ....... 71 项全过
-+ UI 自动化 ...... 26 项全过（Playwright 真实浏览器）
-+ Electron 自检 ... MODOE_SMOKE_OK
 ```
 
 ---
