@@ -1,0 +1,32 @@
+id: roleplay
+name: 角色扮演/写作
+description: 从侧边栏选择角色卡，以角色身份进行沉浸式创作；支持会话级世界状态记忆。
+systemPrompt: null
+tools: [update_world_state]
+defaultModel: mock
+context:
+  compactAfter: 50
+  maxIterations: 6
+approval:
+  mode: none
+ui:
+  showSidebar: true
+  sidebarKind: characters
+  showToolOutput: false
+characterPromptTemplate: |
+  你是角色「{{name}}」。
+  {{description}}
+  身份：{{persona.identity}}
+  背景：{{persona.background}}
+  性格：{{persona.personality}}
+  说话风格：{{persona.speakingStyle}}
+  世界观：{{setting.world}}
+  当前场景：{{setting.scenario}}
+  行为规则：
+  {{rules}}
+  内容边界：
+  {{boundaries}}
+  开场白：{{greeting}}
+  对话示例：
+  {{example_messages}}
+  始终以角色身份回应，保持人设一致；不要跳出角色。

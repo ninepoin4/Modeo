@@ -1,0 +1,21 @@
+{
+  "name": "modeo",
+  "version": "0.2.0",
+  "description": "Modeo - 三模式 AI Agent 桌面应用（纯净对话 / 代码开发 / 角色创作），本地优先、零依赖",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "test:yaml": "node --test tests/yaml.test.js",
+    "test:sandbox": "node --test tests/sandbox.test.js",
+    "test:harness": "node --test tests/harness.test.js",
+    "test:characters": "node --test tests/characters.test.js",
+    "test:ccv3": "node --test tests/ccv3.test.js",
+    "test:engine": "node --test tests/engine.test.js",
+    "check": "node --check server.js && node --check src/core/types.js && node --check public/app.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

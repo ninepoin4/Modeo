@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Modeo - 三模式 AI Agent</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Modeo</div>
+    <nav class="mode-tabs" id="modeTabs"></nav>
+    <div class="topbar-actions">
+      <button id="btnTransparency" class="icon-btn" title="提示词透明面板">透</button>
+      <button id="btnSettings" class="icon-btn" title="设置">设</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar" id="sessionSidebar">
+      <div class="sidebar-head">
+        <span>会话</span>
+        <button id="btnNewSession" class="small-btn">+ 新建</button>
+        <button id="btnImportSession" class="small-btn" title="导入会话 JSON">导入</button>
+      </div>
+      <ul id="sessionList" class="session-list"></ul>
+    </aside>
+
+    <section class="chat-area">
+      <div id="modeBanner" class="mode-banner"></div>
+      <div id="messages" class="messages"></div>
+      <div id="characterBadge" class="character-badge hidden"></div>
+      <form id="composer" class="composer">
+        <textarea id="input" rows="3" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+        <button type="submit" id="btnSend">发送</button>
+      </form>
+    </section>
+
+    <aside class="sidebar right hidden" id="characterSidebar">
+      <div class="sidebar-head">
+        <span>角色</span>
+        <button id="btnNewCharacter" class="small-btn">+ 新建</button>
+        <button id="btnImportCharacter" class="small-btn">导入</button>
+        <button id="btnExportPack" class="small-btn" title="导出全部角色为角色包">导出包</button>
+        <button id="btnImportPack" class="small-btn" title="从角色包文件导入">装包</button>
+      </div>
+      <ul id="characterList" class="session-list"></ul>
+      <div class="sidebar-head"><span>本地角色包</span></div>
+      <ul id="packsList" class="session-list"></ul>
+      <div class="sidebar-head"><span>角色市场</span></div>
+      <input id="marketUrl" placeholder="市场索引 URL" />
+      <button id="btnMarketRefresh" class="small-btn">刷新</button>
+      <ul id="marketList" class="session-list"></ul>
+      <div class="sidebar-head"><span>角色阵容（本会话）</span></div>
+      <ul id="castList" class="session-list"></ul>
+      <div class="world-state-box">
+        <div class="sidebar-head">
+          <span>世界状态</span>
+          <button id="btnEditWorldState" class="small-btn">编辑</button>
+        </div>
+        <div id="worldStateList" class="world-state-list">（空）</div>
+      </div>
+      <div class="sidebar-hint">角色为规范化 YAML 文件，支持 CCv3 导入导出。</div>
+    </aside>
+
+    <aside class="sidebar right hidden" id="toolPanel">
+      <div class="sidebar-head">
+        <span>工具活动</span>
+        <button id="btnDiff" class="small-btn">改动</button>
+        <button id="btnUndo" class="small-btn">撤销</button>
+      </div>
+      <div id="toolLog" class="tool-log"></div>
+    </aside>
+  </main>
+
+  <input type="file" id="importFile" accept=".json,.png,application/json,image/png" class="hidden" />
+  <input type="file" id="packFile" accept=".json,application/json" class="hidden" />
+  <input type="file" id="sessionFile" accept=".json,application/json" class="hidden" />
+
+  <div id="modalRoot" class="modal-root hidden"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

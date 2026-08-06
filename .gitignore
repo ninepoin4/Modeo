@@ -1,0 +1,11 @@
+node_modules/
+desktop/node_modules/
+frontend/node_modules/
+workspaces/*/
+!workspaces/default/.gitkeep
+data/sessions/
+data/checkpoints/
+data/harness/
+data/*.json
+*.log
+.DS_Store

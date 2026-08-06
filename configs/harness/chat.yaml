@@ -1,0 +1,16 @@
+# 普通 Chat：零注入承诺——本模式不注入任何前置提示词。
+id: chat
+name: 普通 Chat
+description: 零隐藏提示词的纯净对话，不注入任何系统提示词。
+systemPrompt: null
+tools: []
+defaultModel: mock
+context:
+  compactAfter: 40
+  maxIterations: 4
+approval:
+  mode: none
+ui:
+  showSidebar: false
+  sidebarKind: none
+  showToolOutput: false
