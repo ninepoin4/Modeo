@@ -1,14 +1,61 @@
 {
   "name": "modeo-desktop",
-  "version": "0.1.0",
-  "description": "Modeo 桌面封装（Electron 壳 + 内置 Node 服务）",
+  "version": "2.8.0",
+  "description": "Modeo 桌面客户端（Electron 壳 + 内置 Node 服务）",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "smoke": "electron . --smoke"
+    "smoke": "electron . --smoke",
+    "dist": "electron-builder --win portable",
+    "dist:dir": "electron-builder --win dir"
   },
   "license": "MIT",
   "devDependencies": {
-    "electron": "^40.10.2"
+    "electron": "^40.10.2",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.modeo.desktop",
+    "productName": "Modeo",
+    "directories": {
+      "output": "release"
+    },
+    "asar": false,
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "..",
+        "to": "modeo",
+        "filter": [
+          "**/*",
+          "!frontend/**",
+          "!desktop/**",
+          "!tests/**",
+          "!data/**",
+          "!workspaces/**",
+          "!docs/screenshots/**",
+          "!**/node_modules/**"
+        ]
+      }
+    ],
+    "electronDist": "node_modules/electron/dist",
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "Modeo-${version}-portable.exe"
+    }
   }
 }

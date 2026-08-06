@@ -5,10 +5,51 @@ const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const http = require('node:http');
 const path = require('node:path');
+const fs = require('node:fs');
+
+app.setName('Modeo');
 
 const SERVER_PORT = Number(process.env.MODEO_PORT || 8787);
-const SERVER_DIR = path.join(__dirname, '..');
+const SERVER_DIR = app.isPackaged ? path.join(process.resourcesPath, 'modeo') : path.join(__dirname, '..');
 const APP_URL = `http://127.0.0.1:${SERVER_PORT}`;
+
+/** 便携/打包模式下，把内置资源首次复制到用户数据目录，保证可读写、可持久化。 */
+function seedUserDir(target, source) {
+  try {
+    if (fs.existsSync(target)) return;
+    fs.mkdirSync(target, { recursive: true });
+    if (!fs.existsSync(source)) return;
+    for (const f of fs.readdirSync(source)) {
+      const src = path.join(source, f);
+      if (fs.statSync(src).isFile()) fs.copyFileSync(src, path.join(target, f));
+    }
+  } catch {
+    // 种子失败不阻塞启动
+  }
+}
+
+function serverEnv() {
+  const env = { ...process.env, MODEO_PORT: String(SERVER_PORT) };
+  if (app.isPackaged) {
+    const ud = app.getPath('userData');
+    const dataDir = path.join(ud, 'data');
+    const wsDir = path.join(ud, 'workspaces', 'default');
+    const charDir = path.join(ud, 'characters');
+    const packsDir = path.join(ud, 'packs');
+    const pluginsDir = path.join(ud, 'plugins');
+    seedUserDir(charDir, path.join(SERVER_DIR, 'characters'));
+    seedUserDir(packsDir, path.join(SERVER_DIR, 'characters', 'packs'));
+    seedUserDir(pluginsDir, path.join(SERVER_DIR, 'plugins'));
+    seedUserDir(wsDir, path.join(SERVER_DIR, 'workspaces', 'default'));
+    fs.mkdirSync(dataDir, { recursive: true });
+    env.MODEO_DATA_DIR = dataDir;
+    env.MODEO_WORKSPACE_DIR = wsDir;
+    env.MODEO_CHARACTERS_DIR = charDir;
+    env.MODEO_PACKS_DIR = packsDir;
+    env.MODEO_PLUGINS_DIR = pluginsDir;
+  }
+  return env;
+}
 
 function waitForServer(url, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
@@ -32,9 +73,9 @@ let serverProc = null;
 let mainWindow = null;
 
 app.whenReady().then(async () => {
-  serverProc = spawn('node', ['server.js'], {
+  serverProc = spawn(process.execPath, ['server.js'], {
     cwd: SERVER_DIR,
-    env: { ...process.env, MODEO_PORT: String(SERVER_PORT) },
+    env: { ...serverEnv(), ELECTRON_RUN_AS_NODE: '1' },
     stdio: 'ignore',
     windowsHide: true,
   });

@@ -30,9 +30,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
 const WEB_DIR = path.join(ROOT, 'web');
 const PUBLIC_DIR = fs.existsSync(WEB_DIR) ? WEB_DIR : path.join(ROOT, 'public');
-const DATA_DIR = path.join(ROOT, 'data');
+const DATA_DIR = process.env.MODEO_DATA_DIR ? path.resolve(process.env.MODEO_DATA_DIR) : path.join(ROOT, 'data');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
-const WORKSPACE_ROOT = path.join(ROOT, 'workspaces', 'default');
+const WORKSPACE_ROOT = process.env.MODEO_WORKSPACE_DIR
+  ? path.resolve(process.env.MODEO_WORKSPACE_DIR)
+  : path.join(ROOT, 'workspaces', 'default');
 const USER_HARNESS_DIR = path.join(DATA_DIR, 'harness');
 const PORT = Number(process.env.MODEO_PORT || 8787);
 
@@ -62,7 +64,7 @@ function reloadUserMode(id) {
   }
 }
 
-const PLUGINS_DIR = path.join(ROOT, 'plugins');
+const PLUGINS_DIR = process.env.MODEO_PLUGINS_DIR ? path.resolve(process.env.MODEO_PLUGINS_DIR) : path.join(ROOT, 'plugins');
 let toolRegistry = createAllTools(WORKSPACE_ROOT);
 let pluginInfo = [];
 

@@ -8,6 +8,20 @@ where node >nul 2>nul || (
   exit /b 1
 )
 
-echo [Modeo] Starting Modeo at http://localhost:8787
-node server.js
-pause
+if not exist "desktop\node_modules" (
+  echo [Modeo] First run: installing desktop dependencies...
+  pushd desktop
+  call npm install --no-audit --no-fund
+  if errorlevel 1 (
+    echo [Modeo] Dependency install failed.
+    popd
+    pause
+    exit /b 1
+  )
+  popd
+)
+
+echo [Modeo] Starting Modeo desktop client...
+pushd desktop
+call npm start
+popd

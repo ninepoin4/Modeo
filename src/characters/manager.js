@@ -8,7 +8,9 @@ import { parseYaml, stringifyYaml } from '../core/yaml.js';
 import { validateCharacter, normalizeCharacter, isValidId } from './schema.js';
 
 const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
-const CHARACTER_DIR = path.join(ROOT, 'characters');
+const CHARACTER_DIR = process.env.MODEO_CHARACTERS_DIR
+  ? path.resolve(process.env.MODEO_CHARACTERS_DIR)
+  : path.join(ROOT, 'characters');
 
 export class CharacterError extends Error {}
 

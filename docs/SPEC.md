@@ -9,7 +9,8 @@
 - **流式**：SSE（text/event-stream），客户端用 fetch 读取。
 - **配置/数据**：YAML（harness、角色），JSON（会话、设置、审批、角色包）。内置 YAML 子集解析器。
 - **模型接入**：Provider 抽象；内置 `mock`（离线演示/测试）与 `openai`（OpenAI 兼容 chat/completions API）。
-- **桌面封装**：`desktop/` 目录独立 Electron 壳（自带 package.json），启动内置服务后加载本地界面。
+- **桌面封装**：`desktop/` 目录独立 Electron 壳（自带 package.json），以 Electron 内置 Node（ELECTRON_RUN_AS_NODE）启动服务并加载本地界面；支持 `electron-builder` 生成免安装便携版 exe（`npm run dist`，产物在 `desktop/release/`），打包后应用文件置于 `resources/modeo`。
+- **可移植目录（环境变量）**：服务端支持 `MODEO_DATA_DIR`（会话/设置/审批）、`MODEO_WORKSPACE_DIR`（沙箱）、`MODEO_CHARACTERS_DIR`（角色）、`MODEO_PACKS_DIR`（角色包）、`MODEO_PLUGINS_DIR`（插件）、`MODEO_PORT`（端口）。Electron 打包模式下自动指向用户数据目录（`%APPDATA%/Modeo`），首次运行复制内置角色/插件/工作区种子，保证便携版数据可持久化。
 
 ## 2. 目录结构
 

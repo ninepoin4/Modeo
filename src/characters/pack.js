@@ -9,7 +9,9 @@ import { validateCharacter, normalizeCharacter } from './schema.js';
 import * as manager from './manager.js';
 
 const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
-const PACKS_DIR = path.join(ROOT, 'characters', 'packs');
+const PACKS_DIR = process.env.MODEO_PACKS_DIR
+  ? path.resolve(process.env.MODEO_PACKS_DIR)
+  : path.join(ROOT, 'characters', 'packs');
 
 export const PACK_FORMAT = 'modeo-character-pack';
 export const PACK_FORMAT_VERSION = 1;

@@ -1,10 +1,11 @@
 {
   "name": "modeo",
-  "version": "0.2.0",
+  "version": "2.8.0",
   "description": "Modeo - 三模式 AI Agent 桌面应用（纯净对话 / 代码开发 / 角色创作），本地优先、零依赖",
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "start:desktop": "npm --prefix desktop start",
     "test": "node --test",
     "test:yaml": "node --test tests/yaml.test.js",
     "test:sandbox": "node --test tests/sandbox.test.js",
