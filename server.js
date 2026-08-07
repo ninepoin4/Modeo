@@ -100,6 +100,15 @@ function saveSettings(s) {
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2), 'utf8');
 }
 
+/**
+ * 对外脱敏：apiKey 不回传明文，改为 apiKeySet 布尔。
+ * 前端保存时 apiKey 传空字符串表示未修改，服务端保留原值。
+ */
+function publicSettings(s) {
+  const { apiKey, ...rest } = s;
+  return { ...rest, apiKeySet: Boolean(apiKey) };
+}
+
 function publicMode(h) {
   return {
     id: h.id,
@@ -605,6 +614,15 @@ const server = http.createServer(async (req, res) => {
       sessionStore.setGoal(session, body.goal);
       return sendJson(res, 200, { session });
     }
+    if (method === 'PUT' && p.startsWith('/api/sessions/') && p.endsWith('/permission-mode')) {
+      const id = p.slice('/api/sessions/'.length, -'/permission-mode'.length);
+      const session = getSessionOr404(res, id);
+      if (!session) return;
+      if (session.modeId !== 'code') return sendJson(res, 400, { error: '权限模式仅适用于 Code 模式会话' });
+      const body = await readJson(req);
+      const updated = sessionStore.setPermissionMode(session, body.mode);
+      return sendJson(res, 200, { session: updated });
+    }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/compress')) {
       const id = p.slice('/api/sessions/'.length, -'/compress'.length);
       const session = getSessionOr404(res, id);
@@ -829,13 +847,17 @@ const server = http.createServer(async (req, res) => {
       }
     }
     if (method === 'GET' && p === '/api/settings') {
-      return sendJson(res, 200, { settings: loadSettings() });
+      return sendJson(res, 200, { settings: publicSettings(loadSettings()) });
     }
     if (method === 'POST' && p === '/api/settings') {
       const body = await readJson(req);
       const settings = { ...loadSettings(), ...body };
+      // apiKey 为空字符串表示"未修改"：保留原值（前端脱敏后不回传密钥）
+      if (body.apiKey === '' && loadSettings().apiKey) {
+        settings.apiKey = loadSettings().apiKey;
+      }
       saveSettings(settings);
-      return sendJson(res, 200, { settings });
+      return sendJson(res, 200, { settings: publicSettings(settings) });
     }
     if (method === 'GET' && p === '/api/themes') {
       return sendJson(res, 200, { themes: listThemes() });
@@ -859,7 +881,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Modeo 已启动: http://localhost:${PORT}`);
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`Modeo 已启动: http://127.0.0.1:${PORT}`);
   console.log(`沙箱工作区: ${WORKSPACE_ROOT}`);
 });

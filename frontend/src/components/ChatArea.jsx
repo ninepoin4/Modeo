@@ -102,7 +102,7 @@ function Bubble({ m, streaming, delay }) {
   );
 }
 
-export default function ChatArea({ session, messages, streaming, characterName, onSend, onStop, onTransparency, onSlashCommand, onUnknownSlash }) {
+export default function ChatArea({ session, messages, streaming, characterName, onSend, onStop, onTransparency, onSlashCommand, onUnknownSlash, onPermissionChange }) {
   const [text, setText] = useState('');
   const [showBottom, setShowBottom] = useState(false);
   const [suggestDismissed, setSuggestDismissed] = useState(false);
@@ -178,6 +178,34 @@ export default function ChatArea({ session, messages, streaming, characterName, 
               <Badge data-testid="goal-badge" className="max-w-[220px]">
                 <span className="truncate">目标 · {session.goal.length > 16 ? `${session.goal.slice(0, 16)}…` : session.goal}</span>
               </Badge>
+            </Tooltip>
+          )}
+          {mode === 'code' && (
+            <Tooltip
+              content={
+                session?.permissionMode === 'aggressive'
+                  ? '无审批模式（激进）：agent 可执行任意命令、访问任意文件。点击切换回一般模式。'
+                  : '一般模式：危险命令与敏感路径访问需审批。点击切换为无审批模式。'
+              }
+            >
+              <button
+                data-testid="permission-toggle"
+                onClick={onPermissionChange}
+                className={
+                  session?.permissionMode === 'aggressive'
+                    ? 'flex items-center gap-1 rounded-full border border-red-600/50 bg-red-600/10 px-2.5 py-1 text-xs text-red-700 transition-colors hover:bg-red-600/20'
+                    : 'flex items-center gap-1 rounded-full border border-line bg-card/60 px-2.5 py-1 text-xs text-muted transition-colors hover:border-ink/40 hover:text-ink'
+                }
+              >
+                <span
+                  className={
+                    session?.permissionMode === 'aggressive'
+                      ? 'h-1.5 w-1.5 rounded-full bg-red-600'
+                      : 'h-1.5 w-1.5 rounded-full bg-muted'
+                  }
+                />
+                {session?.permissionMode === 'aggressive' ? '无审批模式' : '一般模式'}
+              </button>
             </Tooltip>
           )}
           <Tooltip content="提示词透明面板">

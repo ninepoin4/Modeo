@@ -232,6 +232,33 @@ export default function App() {
     abortRef.current?.abort();
   }, []);
 
+  /** 切换 code 会话权限模式；进入无审批模式需显式确认 */
+  const togglePermissionMode = useCallback(() => {
+    if (!session || session.modeId !== 'code') return;
+    const next = session.permissionMode === 'aggressive' ? 'standard' : 'aggressive';
+    const apply = async () => {
+      try {
+        const r = await api.setPermissionMode(session.id, next);
+        setSession(r.session);
+        setMessages(r.session.messages || []);
+        toast(next === 'aggressive' ? '已切换到无审批模式（激进）' : '已切换到一般模式', next === 'aggressive' ? 'error' : 'success');
+      } catch (e) {
+        toast('切换失败：' + e.message, 'error');
+      }
+    };
+    if (next === 'aggressive') {
+      setConfirm({
+        title: '切换到无审批模式？',
+        description:
+          '无审批模式（激进）下，agent 可执行任意命令、读写任意文件，不再弹出审批。仅在可信环境使用，风险自负。',
+        danger: true,
+        action: apply,
+      });
+    } else {
+      apply();
+    }
+  }, [session, toast]);
+
   const decideApproval = useCallback(
     async (decision) => {
       const a = pendingApproval;
@@ -619,6 +646,7 @@ export default function App() {
             onTransparency={() => setDialog((d) => ({ ...d, transparency: true }))}
             onSlashCommand={handleSlashCommand}
             onUnknownSlash={handleUnknownSlash}
+            onPermissionChange={togglePermissionMode}
             />
             <AnimatePresence mode="wait" initial={false}>
               {selectedMode === 'code' && (

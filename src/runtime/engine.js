@@ -119,9 +119,12 @@ export async function runAgentTurn(opts) {
 
   const cast = characters && characters.length ? characters : character ? [character] : [];
   let systemPrompt = assembleSystemPrompt(harness, cast, workspaceRoot, session);
-  const approvalMode = harness.approval?.mode || 'dangerous-only';
+  // 无审批模式（激进）：code 会话可切换；放行一切命令与文件访问
+  const aggressive = session?.permissionMode === 'aggressive';
+  const approvalMode = aggressive ? 'none' : harness.approval?.mode || 'dangerous-only';
   const maxIterations = harness.context?.maxIterations || 8;
   const tools = (harness.tools || []).map((name) => toolRegistry.get(name)).filter(Boolean);
+  const baseCtx = { workspaceRoot, approvals, session, persist, aggressive };
 
   try {
     // 先重建 provider 视角的消息列表
@@ -137,7 +140,7 @@ export async function runAgentTurn(opts) {
       if (approval.status === 'approved') {
         const tool = toolRegistry.get(pending.toolCall.name);
         snapshotBefore(session, workspaceRoot, pending.toolCall, emit);
-        const ctx = { workspaceRoot, approvals, forceApproved: true, session, persist };
+        const ctx = { ...baseCtx, forceApproved: true };
         const result = tool
           ? await tool.execute(pending.toolCall.args, ctx)
           : { output: `未知工具: ${pending.toolCall.name}`, isError: true };
@@ -205,7 +208,7 @@ export async function runAgentTurn(opts) {
             emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: tc, result: r });
             continue;
           }
-          const ctx = { workspaceRoot, approvals, session, persist };
+          const ctx = baseCtx;
           // 先判定是否需审批：all 模式任何工具都先审批；dangerous-only 模式由工具预检（危险命令不实际执行）
           let needsApproval = approvalMode === 'all';
           let result = null;
@@ -219,7 +222,7 @@ export async function runAgentTurn(opts) {
             const approval = approvals.createApproval({
               sessionId: session.id,
               toolCall: tc,
-              summary: `${tc.name} ${JSON.stringify(tc.args)}`,
+              summary: (result && result.approvalReason) || `${tc.name} ${JSON.stringify(tc.args)}`,
             });
             session.pendingApproval = { approvalId: approval.id, toolCall: tc };
             persist(session);

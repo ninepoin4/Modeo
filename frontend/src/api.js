@@ -36,6 +36,7 @@ export const api = {
   exportSession: (id) => request(`/api/sessions/${id}/export`),
   switchMode: (id, modeId) => request(`/api/sessions/${id}/switch-mode`, { method: 'POST', body: { modeId } }),
   setGoal: (id, goal) => request(`/api/sessions/${id}/goal`, { method: 'PUT', body: { goal } }),
+  setPermissionMode: (id, mode) => request(`/api/sessions/${id}/permission-mode`, { method: 'PUT', body: { mode } }),
   compress: (id) => request(`/api/sessions/${id}/compress`, { method: 'POST' }),
   clearSession: (id) => request(`/api/sessions/${id}/clear`, { method: 'POST' }),
   addCast: (id, characterId) => request(`/api/sessions/${id}/characters`, { method: 'POST', body: { characterId } }),

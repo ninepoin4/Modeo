@@ -99,7 +99,9 @@ export default function SettingsDialog({
 
   const save = async () => {
     try {
-      const r = await api.saveSettings(draft);
+      // apiKey 未填写则传空字符串，服务端保留原值（脱敏设计）
+      const payload = { ...draft, apiKey: draft.apiKey || '' };
+      const r = await api.saveSettings(payload);
       onSave(r.settings);
       onClose();
     } catch (e) {
@@ -238,8 +240,13 @@ export default function SettingsDialog({
               <Input value={draft.baseUrl || ''} onChange={(e) => set('baseUrl', e.target.value)} />
             </label>
             <label className="block col-span-2">
-              <span className="mb-1 block text-xs text-muted">API Key（仅存本地）</span>
-              <Input type="password" value={draft.apiKey || ''} onChange={(e) => set('apiKey', e.target.value)} />
+              <span className="mb-1 block text-xs text-muted">API Key（仅存本地{draft.apiKeySet ? ' · 已设置' : ''}）</span>
+              <Input
+                type="password"
+                placeholder={draft.apiKeySet ? '已设置，留空则保持不变' : '输入 API Key'}
+                value={draft.apiKey || ''}
+                onChange={(e) => set('apiKey', e.target.value)}
+              />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-muted">Temperature</span>

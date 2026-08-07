@@ -1,20 +1,29 @@
 /**
  * 自动跑测试工具：探测项目测试入口并在工作区内执行。
+ * 安全：npm test 的 scripts.test 内容先过危险检测，危险脚本必须走审批；
+ * 探测结果支持注入 testScript 字段供检测。
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { createShellTool } from './shellTool.js';
+import { createShellTool, isDangerous } from './shellTool.js';
 
 /**
- * 探测测试命令。返回 { type:'node'|'shell', command?, label } 或 null。
+ * 探测测试命令。返回 { type:'node'|'shell', command?, label, testScript? } 或 null。
  */
 export function detectTestCommand(workspaceRoot) {
   const pkgFile = path.join(workspaceRoot, 'package.json');
   if (fs.existsSync(pkgFile)) {
     try {
       const scripts = JSON.parse(fs.readFileSync(pkgFile, 'utf8')).scripts || {};
-      if (scripts.test) return { type: 'shell', command: 'npm test', label: 'npm test（package.json scripts.test）' };
+      if (scripts.test) {
+        return {
+          type: 'shell',
+          command: 'npm test',
+          label: 'npm test（package.json scripts.test）',
+          testScript: String(scripts.test),
+        };
+      }
     } catch {
       /* 解析失败则继续探测 */
     }
@@ -87,12 +96,24 @@ export function createRunTestsTool(workspaceRoot, shellTool) {
           isError: true,
         };
       }
+      // 安全闸门：npm test 的 scripts.test 是任意命令，命中危险模式必须先审批
+      if (detected.type === 'shell' && detected.testScript && isDangerous(detected.testScript)) {
+        if (!ctx.forceApproved) {
+          return {
+            output: `[危险测试脚本，等待审批] npm test 将执行：${detected.testScript}`,
+            isError: false,
+            needsApproval: true,
+            approvalReason: `npm test 将执行危险命令：${detected.testScript}`,
+          };
+        }
+      }
+      // forceApproved 仅在用户批准后由引擎 resume 传入；此时才真正执行
       const result =
         detected.type === 'node'
           ? await runNodeTests(workspaceRoot, 90000)
           : await shell.execute(
               { command: detected.command, timeoutMs: 90000 },
-              { ...ctx, forceApproved: true }
+              { ...ctx, forceApproved: ctx.forceApproved === true }
             );
       return {
         output: `测试命令：${detected.label}\n${result.output}`,

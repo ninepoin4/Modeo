@@ -33,6 +33,8 @@ export function createSession({ modeId, characterId = null }) {
     worldState: {},
     goal: null,
     lastSummary: null,
+    // code 模式权限：standard=一般（审批闸门）/ aggressive=无审批（激进）
+    permissionMode: 'standard',
   };
   saveSession(session);
   return session;
@@ -85,6 +87,26 @@ export function switchMode(session, modeId, modeName = modeId) {
   session.messages.push({
     role: 'notice',
     content: `已切换到『${modeName}』模式，系统提示词与工具已变更。`,
+    id: randomUUID(),
+  });
+  saveSession(session);
+  return session;
+}
+
+/**
+ * 切换会话权限模式（仅 code 模式有意义）：
+ * standard=一般模式（危险命令/敏感路径需审批）；aggressive=无审批模式（激进，完全放行）。
+ * 变更以 notice 记录，前端同步显示。
+ */
+export function setPermissionMode(session, mode) {
+  const next = mode === 'aggressive' ? 'aggressive' : 'standard';
+  if (session.permissionMode === next) return session;
+  session.permissionMode = next;
+  session.messages.push({
+    role: 'notice',
+    content: next === 'aggressive'
+      ? '已切换到无审批模式：agent 可执行任意命令、访问任意文件（激进，风险自负）。'
+      : '已切换到一般模式：危险命令与敏感路径访问需审批。',
     id: randomUUID(),
   });
   saveSession(session);
@@ -157,6 +179,7 @@ export function importSession(data) {
     goal: typeof data.goal === 'string' ? data.goal : null,
     lastSummary: typeof data.lastSummary === 'string' ? data.lastSummary : null,
     pendingApproval: null,
+    permissionMode: data.permissionMode === 'aggressive' ? 'aggressive' : 'standard',
   };
   saveSession(session);
   return session;
