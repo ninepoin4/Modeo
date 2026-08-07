@@ -112,6 +112,22 @@ function walk(dir, rel = '', out = [], exclude = DEFAULT_EXCLUDE) {
  * @param {string} workspaceRoot 当前工作区
  * @returns {{summary:{added:number,removed:number,modified:number}, files:{path:string,status:string,linesAdded:number,linesRemoved:number,diff:string|null}[], text:string}}
  */
+
+/** 单个文件 diff 上限：超过或疑似二进制则跳过内容（防大文件全量读内存） */
+const MAX_DIFF_FILE = 2 * 1024 * 1024;
+
+function readDiffText(p) {
+  try {
+    const st = fs.statSync(p);
+    if (st.size > MAX_DIFF_FILE) return null;
+    const buf = fs.readFileSync(p);
+    if (buf.includes(0)) return null; // 含 null 字节，疑似二进制
+    return buf.toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
 export function diffWorkspace(baselineDir, workspaceRoot) {
   const baseFiles = fs.existsSync(baselineDir) ? walk(baselineDir) : [];
   const workFiles = fs.existsSync(workspaceRoot) ? walk(workspaceRoot) : [];
@@ -121,17 +137,25 @@ export function diffWorkspace(baselineDir, workspaceRoot) {
   const files = [];
   for (const f of baseSet) {
     if (!workSet.has(f)) {
-      const aLines = splitLines(fs.readFileSync(path.join(baselineDir, ...f.split('/')), 'utf8'));
-      files.push({ path: f, status: 'removed', linesAdded: 0, linesRemoved: aLines.length, diff: `--- a/${f}\n+++ b/${f}\n${aLines.map((l) => `-${l}`).join('\n')}` });
+      const aText = readDiffText(path.join(baselineDir, ...f.split('/')));
+      const aLines = aText === null ? ['（文件过大或二进制，跳过内容）'] : splitLines(aText);
+      files.push({ path: f, status: 'removed', linesAdded: 0, linesRemoved: aText === null ? 0 : aLines.length, diff: `--- a/${f}\n+++ b/${f}\n${aLines.map((l) => `-${l}`).join('\n')}` });
     }
   }
   for (const f of workSet) {
-    const bLines = splitLines(fs.readFileSync(path.join(workspaceRoot, ...f.split('/')), 'utf8'));
+    const bText = readDiffText(path.join(workspaceRoot, ...f.split('/')));
+    const bLines = bText === null ? ['（文件过大或二进制，跳过内容）'] : splitLines(bText);
     if (!baseSet.has(f)) {
-      files.push({ path: f, status: 'added', linesAdded: bLines.length, linesRemoved: 0, diff: `--- a/${f}\n+++ b/${f}\n${bLines.map((l) => `+${l}`).join('\n')}` });
+      files.push({ path: f, status: 'added', linesAdded: bText === null ? 0 : bLines.length, linesRemoved: 0, diff: `--- a/${f}\n+++ b/${f}\n${bLines.map((l) => `+${l}`).join('\n')}` });
       continue;
     }
-    const aLines = splitLines(fs.readFileSync(path.join(baselineDir, ...f.split('/')), 'utf8'));
+    const aText = readDiffText(path.join(baselineDir, ...f.split('/')));
+    if (bText === null || aText === null) {
+      // 任一侧无法读取内容：按二进制/过大处理，不逐行对比
+      if (aText !== bText) files.push({ path: f, status: 'modified', linesAdded: 0, linesRemoved: 0, diff: `--- a/${f}\n+++ b/${f}\n（文件过大或二进制，跳过内容对比）` });
+      continue;
+    }
+    const aLines = splitLines(aText);
     if (aLines.join('\n') === bLines.join('\n')) continue;
     const ops = diffLines(aLines, bLines);
     const added = ops.filter((o) => o.type === 'add').length;

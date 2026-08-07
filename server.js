@@ -164,6 +164,23 @@ function getSessionOr404(res, id) {
   }
 }
 
+/**
+ * 每会话串行锁：同一会话的读-改-写操作排队执行，防止并发请求互相覆盖会话文件。
+ * 用法：withSessionLock(id, () => handler(req, res, id))
+ */
+const sessionLocks = new Map();
+function withSessionLock(id, fn) {
+  const prev = sessionLocks.get(id) || Promise.resolve();
+  const next = prev.then(fn, fn); // 前一个失败也继续执行本任务
+  const tracked = next
+    .catch(() => {})
+    .finally(() => {
+      if (sessionLocks.get(id) === tracked) sessionLocks.delete(id);
+    });
+  sessionLocks.set(id, tracked);
+  return next;
+}
+
 /** 加载会话角色阵容（多角色支持） */
 function loadCast(session) {
   const ids = session.characters && session.characters.length
@@ -351,6 +368,19 @@ function serveStatic(req, res, urlPath) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // Host 校验：仅接受本机访问（防 DNS rebinding / 跨站请求滥用本地 API）
+  const host = String(req.headers.host || '');
+  const hostOk =
+    host === `127.0.0.1:${PORT}` ||
+    host === `localhost:${PORT}` ||
+    host === `127.0.0.1` ||
+    host === `localhost` ||
+    host === `[::1]:${PORT}` ||
+    host === `[::1]`;
+  if (!hostOk) {
+    res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ error: 'forbidden host' }));
+  }
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const p = url.pathname;
   const method = req.method;
@@ -417,6 +447,20 @@ const server = http.createServer(async (req, res) => {
     }
     if (method === 'GET' && p === '/api/sessions') {
       return sendJson(res, 200, { sessions: sessionStore.listSessions() });
+    }
+    if (method === 'DELETE' && p.startsWith('/api/sessions/') && !p.slice('/api/sessions/'.length).includes('/')) {
+      const id = p.slice('/api/sessions/'.length).split('/')[0];
+      if (!id) return sendJson(res, 400, { error: '缺少会话 id' });
+      try {
+        sessionStore.deleteSession(id);
+        // 顺带清理该会话的快照与基线（目录不存在则跳过）
+        for (const dir of [path.join(DATA_DIR, 'checkpoints', id), path.join(DATA_DIR, 'baselines', id)]) {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+        return sendJson(res, 200, { ok: true });
+      } catch (err) {
+        return sendJson(res, 404, { error: err.message || '会话不存在' });
+      }
     }
     if (method === 'POST' && p === '/api/sessions') {
       const body = await readJson(req);
@@ -584,11 +628,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/messages')) {
       const id = p.slice('/api/sessions/'.length, -'/messages'.length);
-      return handleMessages(req, res, id);
+      return withSessionLock(id, () => handleMessages(req, res, id));
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/resume')) {
       const id = p.slice('/api/sessions/'.length, -'/resume'.length);
-      return handleResume(req, res, id);
+      return withSessionLock(id, () => handleResume(req, res, id));
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/switch-mode')) {
       const id = p.slice('/api/sessions/'.length, -'/switch-mode'.length);
@@ -620,6 +664,10 @@ const server = http.createServer(async (req, res) => {
       if (!session) return;
       if (session.modeId !== 'code') return sendJson(res, 400, { error: '权限模式仅适用于 Code 模式会话' });
       const body = await readJson(req);
+      // 切换到无审批模式（激进）需要显式确认标记，防 API 被任意调用开启
+      if (body.mode === 'aggressive' && body.confirm !== true) {
+        return sendJson(res, 400, { error: '切换到无审批模式需要 confirm: true 确认' });
+      }
       const updated = sessionStore.setPermissionMode(session, body.mode);
       return sendJson(res, 200, { session: updated });
     }
@@ -838,8 +886,8 @@ const server = http.createServer(async (req, res) => {
       const id = p.slice('/api/approvals/'.length);
       const body = await readJson(req);
       try {
-        if (body.decision === 'approve') approvalsMgr.approve(id);
-        else if (body.decision === 'deny') approvalsMgr.deny(id);
+        if (body.decision === 'approve') approvalsMgr.approve(id, body.sessionId);
+        else if (body.decision === 'deny') approvalsMgr.deny(id, body.sessionId);
         else return sendJson(res, 400, { error: 'decision 必须是 approve 或 deny' });
         return sendJson(res, 200, { approval: approvalsMgr.getApproval(id) });
       } catch (err) {

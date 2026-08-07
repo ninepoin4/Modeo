@@ -97,8 +97,9 @@ export function createRunTestsTool(workspaceRoot, shellTool) {
         };
       }
       // 安全闸门：npm test 的 scripts.test 是任意命令，命中危险模式必须先审批
+      // 无审批模式（aggressive）直接放行；已批准（forceApproved）也放行
       if (detected.type === 'shell' && detected.testScript && isDangerous(detected.testScript)) {
-        if (!ctx.forceApproved) {
+        if (!ctx.forceApproved && !ctx.aggressive) {
           return {
             output: `[危险测试脚本，等待审批] npm test 将执行：${detected.testScript}`,
             isError: false,

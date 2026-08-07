@@ -26,6 +26,8 @@ export const SSE_EVENTS = {
   ERROR: 'error',
   MODE_CHANGED: 'mode_changed',
   CHECKPOINT: 'checkpoint',
+  CHILD_AGENT_START: 'child_agent_start',
+  CHILD_AGENT_END: 'child_agent_end',
 };
 
 /** 构造一条消息 */

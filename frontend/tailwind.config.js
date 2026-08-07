@@ -23,6 +23,12 @@ export default {
         paper: '0 1px 2px rgba(20,20,20,calc(0.04 * var(--shadow-strength, 1))), 0 8px 24px rgba(20,20,20,calc(0.06 * var(--shadow-strength, 1)))',
         lift: '0 2px 4px rgba(20,20,20,calc(0.06 * var(--shadow-strength, 1))), 0 16px 40px rgba(20,20,20,calc(0.10 * var(--shadow-strength, 1)))',
       },
+      borderRadius: {
+        // 主题圆角变量：--radius 为基准，各档按比例派生，默认 16px 与原有设计一致
+        xl: 'calc(var(--radius, 16px) * 0.875)',
+        '2xl': 'var(--radius, 16px)',
+        '3xl': 'calc(var(--radius, 16px) * 1.25)',
+      },
       keyframes: {
         'fade-up': {
           '0%': { opacity: '0', transform: 'translateY(6px)' },

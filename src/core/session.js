@@ -68,6 +68,12 @@ export function getSession(id) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+export function deleteSession(id) {
+  const file = fileOf(id);
+  if (!fs.existsSync(file)) throw new Error(`会话不存在: ${id}`);
+  fs.unlinkSync(file);
+}
+
 export function saveSession(session) {
   session.updatedAt = new Date().toISOString();
   fs.writeFileSync(fileOf(session.id), JSON.stringify(session, null, 2), 'utf8');
@@ -179,7 +185,7 @@ export function importSession(data) {
     goal: typeof data.goal === 'string' ? data.goal : null,
     lastSummary: typeof data.lastSummary === 'string' ? data.lastSummary : null,
     pendingApproval: null,
-    permissionMode: data.permissionMode === 'aggressive' ? 'aggressive' : 'standard',
+    permissionMode: 'standard', // 导入会话一律降级为一般模式（数据不可信）
   };
   saveSession(session);
   return session;

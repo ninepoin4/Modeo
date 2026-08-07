@@ -83,7 +83,8 @@ export default function App() {
   const abortRef = useRef(null);
 
   const refreshBase = useCallback(async () => {
-    const [m, s, c, st, pl, pk, th] = await Promise.all([
+    // 逐项容错：单项接口失败不拖垮整体初始化（如服务未完全就绪）
+    const [m, s, c, st, pl, pk, th] = await Promise.allSettled([
       api.modes(),
       api.sessions(),
       api.characters(),
@@ -92,21 +93,29 @@ export default function App() {
       api.packs(),
       api.themes(),
     ]);
-    setModes(m.modes);
-    setSessions(s.sessions);
-    setCharacters(c.characters);
-    setSettings(st.settings);
-    setThemes(th.themes || []);
-    const saved = st.settings?.theme;
-    if (saved) {
-      const mapped = saved === 'dark' ? 'midnight' : saved === 'light' ? 'paper' : saved;
-      setThemeId(mapped);
+    if (m.status === 'fulfilled') setModes(m.value.modes);
+    if (s.status === 'fulfilled') setSessions(s.value.sessions);
+    if (c.status === 'fulfilled') setCharacters(c.value.characters);
+    if (st.status === 'fulfilled') {
+      setSettings(st.value.settings);
+      const saved = st.value.settings?.theme;
+      if (saved) {
+        const mapped = saved === 'dark' ? 'midnight' : saved === 'light' ? 'paper' : saved;
+        setThemeId(mapped);
+      }
     }
-    setPlugins(pl.plugins || []);
-    setPacks(pk.packs || []);
+    if (th.status === 'fulfilled') setThemes(th.value.themes || []);
+    if (pl.status === 'fulfilled') setPlugins(pl.value.plugins || []);
+    if (pk.status === 'fulfilled') setPacks(pk.value.packs || []);
   }, []);
 
-  const currentTheme = themes.find((t) => t.id === themeId) || null;
+  // 主题回退：themeId 指向的主题不存在（被删除/损坏）时回退到默认主题
+  const currentTheme = themes.find((t) => t.id === themeId) || themes[0] || null;
+  useEffect(() => {
+    if (themes.length && !themes.some((t) => t.id === themeId)) {
+      setThemeId(themes[0].id);
+    }
+  }, [themes, themeId]);
 
   useEffect(() => {
     const t = currentTheme;
@@ -148,11 +157,16 @@ export default function App() {
   }, [themes, themeId, setThemeByName, toast]);
 
   const openSession = useCallback(async (id) => {
+    // 中止进行中的流式请求，避免旧会话的 text_delta 污染新会话
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStreaming(false);
+    setPendingApproval(null);
     const r = await api.session(id);
     setSession(r.session);
     setMessages(r.session.messages || []);
     setSelectedMode(r.session.modeId);
-    if (r.session.characterId) setSelectedCharacterId(r.session.characterId);
+    setSelectedCharacterId(r.session.characterId || null);
     setToolLog([]);
     setMarketPacks([]);
   }, []);
@@ -176,28 +190,46 @@ export default function App() {
           return next;
         });
       } else if (evt.type === 'tool_call') {
-        setToolLog((prev) => [...prev, { id: uid(), type: 'tool', toolCall: evt.toolCall }]);
+        setToolLog((prev) => [...prev, { id: uid(), type: 'tool', toolCall: evt.toolCall }].slice(-300));
         setMessages((prev) => [...prev, { role: 'assistant', content: '', toolCalls: [evt.toolCall], id: uid() }]);
       } else if (evt.type === 'tool_result') {
-        setToolLog((prev) => [...prev, { id: uid(), type: 'tool', toolCall: evt.toolCall, result: evt.result }]);
+        setToolLog((prev) => [...prev, { id: uid(), type: 'tool', toolCall: evt.toolCall, result: evt.result }].slice(-300));
       } else if (evt.type === 'checkpoint') {
-        setToolLog((prev) => [...prev, { id: uid(), type: 'checkpoint', label: evt.checkpoint?.label || evt.checkpoint?.id }]);
+        setToolLog((prev) => [...prev, { id: uid(), type: 'checkpoint', label: evt.checkpoint?.label || evt.checkpoint?.id }].slice(-300));
+      } else if (evt.type === 'child_agent_start') {
+        setToolLog((prev) => [
+          ...prev,
+          { id: uid(), type: 'subagent', state: 'running', description: evt.description, childId: evt.childId, result: '' },
+        ].slice(-300));
+      } else if (evt.type === 'child_agent_end') {
+        // 按 childId 配对：把对应 running 条目标记为完成（保留结果摘要），不新增条目
+        setToolLog((prev) =>
+          prev.map((e) =>
+            e.type === 'subagent' && e.childId === evt.childId
+              ? { ...e, state: 'done', result: evt.result || '' }
+              : e
+          )
+        );
       } else if (evt.type === 'approval_required') {
         setPendingApproval({ approvalId: evt.approvalId, summary: evt.summary });
         setStreaming(false);
       } else if (evt.type === 'done') {
         setStreaming(false);
         setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
-        api.session(session?.id).then((r) => {
-          setSession(r.session);
-          setMessages(r.session.messages || []);
-        });
+        // done 后同步最终会话状态（后端可能补充标题/摘要），并刷新侧边栏列表
+        if (session?.id) {
+          api.session(session.id).then((r) => {
+            setSession(r.session);
+            setMessages(r.session.messages || []);
+          });
+          refreshSessions();
+        }
       } else if (evt.type === 'error') {
         setStreaming(false);
         setMessages((prev) => [...prev, { role: 'assistant', content: `错误：${evt.message}`, id: uid() }]);
       }
     },
-    [session?.id]
+    [session?.id, refreshSessions]
   );
 
   const sendMessage = useCallback(
@@ -218,12 +250,8 @@ export default function App() {
         abortRef.current = null;
       }
       setStreaming(false);
-      if (session) {
-        api.session(session.id).then((r) => {
-          setSession(r.session);
-          setMessages(r.session.messages || []);
-        });
-      }
+      // 兜底清除残留 streaming 标记（abort/断流时 done 事件可能未到达）
+      setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
     },
     [session, streaming, handleStreamEvent]
   );
@@ -235,12 +263,17 @@ export default function App() {
   /** 切换 code 会话权限模式；进入无审批模式需显式确认 */
   const togglePermissionMode = useCallback(() => {
     if (!session || session.modeId !== 'code') return;
+    if (streaming) {
+      toast('消息生成中，暂不可切换权限模式', 'info');
+      return;
+    }
     const next = session.permissionMode === 'aggressive' ? 'standard' : 'aggressive';
     const apply = async () => {
       try {
-        const r = await api.setPermissionMode(session.id, next);
+        const r = await api.setPermissionMode(session.id, next, next === 'aggressive');
         setSession(r.session);
         setMessages(r.session.messages || []);
+        refreshSessions();
         toast(next === 'aggressive' ? '已切换到无审批模式（激进）' : '已切换到一般模式', next === 'aggressive' ? 'error' : 'success');
       } catch (e) {
         toast('切换失败：' + e.message, 'error');
@@ -257,24 +290,40 @@ export default function App() {
     } else {
       apply();
     }
-  }, [session, toast]);
+  }, [session, toast, streaming, refreshSessions]);
 
   const decideApproval = useCallback(
     async (decision) => {
       const a = pendingApproval;
+      if (!a) return;
       setPendingApproval(null);
-      await api.decideApproval(a.approvalId, decision);
+      // 审批决策本身失败：恢复 pendingApproval，允许用户重试（不丢审批上下文）
+      try {
+        await api.decideApproval(a.approvalId, decision, session.id);
+      } catch (e) {
+        setPendingApproval(a);
+        setMessages((prev) => [...prev, { role: 'assistant', content: `审批操作失败：${e.message}`, id: uid() }]);
+        return;
+      }
       if (decision === 'deny') {
         setMessages((prev) => [...prev, { role: 'assistant', content: '已拒绝该操作。', id: uid() }]);
         return;
       }
       setStreaming(true);
+      // resume 流同样可被停止按钮中断（存入 abortRef）
+      const controller = new AbortController();
+      abortRef.current = controller;
       try {
-        await streamEvents(`/api/sessions/${session.id}/resume`, {}, handleStreamEvent);
+        await streamEvents(`/api/sessions/${session.id}/resume`, {}, handleStreamEvent, { signal: controller.signal });
       } catch (e) {
-        setStreaming(false);
-        setMessages((prev) => [...prev, { role: 'assistant', content: `恢复失败：${e.message}`, id: uid() }]);
+        if (e.name !== 'AbortError') {
+          setStreaming(false);
+          setMessages((prev) => [...prev, { role: 'assistant', content: `恢复失败：${e.message}（可重新发送消息继续）`, id: uid() }]);
+        }
+      } finally {
+        abortRef.current = null;
       }
+      setStreaming(false);
     },
     [pendingApproval, session?.id, handleStreamEvent]
   );
@@ -282,16 +331,23 @@ export default function App() {
   const switchMode = useCallback(
     async (modeId) => {
       if (modeId === selectedMode) return;
+      // 中止进行中的流式请求，避免旧流的 text_delta/tool_call 污染新模式会话
+      if (streaming) abortRef.current?.abort();
+      abortRef.current = null;
+      setStreaming(false);
+      setPendingApproval(null);
+      setToolLog([]);
       if (session) {
         const r = await api.switchMode(session.id, modeId);
         setSession(r.session);
         setMessages(r.session.messages || []);
       }
+      refreshSessions();
       setSelectedMode(modeId);
       const m = modes.find((x) => x.id === modeId);
       toast(`已切换到「${m?.name || modeId}」`, 'success');
     },
-    [selectedMode, session, modes, toast]
+    [selectedMode, session, modes, toast, streaming, refreshSessions]
   );
 
   const newSession = useCallback(async () => {
@@ -301,6 +357,35 @@ export default function App() {
     await refreshSessions();
     await openSession(r.session.id);
   }, [selectedMode, selectedCharacterId, refreshSessions, openSession]);
+
+  const deleteSession = useCallback(
+    async (id) => {
+      setConfirm({
+        title: '删除会话？',
+        description: '将删除该会话及其关联快照与基线，此操作不可恢复。',
+        danger: true,
+        action: async () => {
+          try {
+            await api.deleteSession(id);
+            await refreshSessions();
+            if (session?.id === id) {
+              // 删除的是当前打开的会话：清空当前状态
+              setSession(null);
+              setMessages([]);
+              setToolLog([]);
+              setPendingApproval(null);
+              setSelectedMode('chat');
+              setSelectedCharacterId(null);
+            }
+            toast('会话已删除', 'success');
+          } catch (e) {
+            toast('删除失败：' + e.message, 'error');
+          }
+        },
+      });
+    },
+    [session, refreshSessions, toast, setConfirm]
+  );
 
   const exportCurrentSession = useCallback(() => {
     if (!session) return;
@@ -608,6 +693,7 @@ export default function App() {
           onOpen={openSession}
           onNew={newSession}
           onImport={importSessionFile}
+          onDelete={deleteSession}
         />
 
         <main className="flex min-w-0 flex-1 flex-col">

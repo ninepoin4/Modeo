@@ -25,6 +25,9 @@ function persistAll() {
 
 const pending = loadAll();
 
+/** 审批有效期（毫秒）：超时未决定视为过期，resume 时拒绝 */
+export const APPROVAL_TTL_MS = 10 * 60 * 1000;
+
 export function createApproval({ sessionId, toolCall, summary }) {
   const approval = {
     id: randomUUID(),
@@ -33,24 +36,41 @@ export function createApproval({ sessionId, toolCall, summary }) {
     summary: summary || `${toolCall.name} ${JSON.stringify(toolCall.args)}`,
     status: 'pending',
     createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + APPROVAL_TTL_MS).toISOString(),
   };
   pending.set(approval.id, approval);
   persistAll();
   return approval;
 }
 
-export function approve(id) {
+/** 若审批已超过有效期，标记 expired 并返回 true */
+export function isExpired(a) {
+  if (a.status !== 'pending' || !a.expiresAt) return false;
+  if (Date.now() > new Date(a.expiresAt).getTime()) {
+    a.status = 'expired';
+    a.decidedAt = new Date().toISOString();
+    persistAll();
+    return true;
+  }
+  return false;
+}
+
+export function approve(id, sessionId) {
   const a = pending.get(id);
   if (!a) throw new Error('审批不存在');
+  if (sessionId && a.sessionId !== sessionId) throw new Error('审批不属于当前会话');
+  if (isExpired(a)) throw new Error('审批已超时，请重新发起操作');
   a.status = 'approved';
   a.decidedAt = new Date().toISOString();
   persistAll();
   return a;
 }
 
-export function deny(id) {
+export function deny(id, sessionId) {
   const a = pending.get(id);
   if (!a) throw new Error('审批不存在');
+  if (sessionId && a.sessionId !== sessionId) throw new Error('审批不属于当前会话');
+  if (isExpired(a)) throw new Error('审批已超时，请重新发起操作');
   a.status = 'denied';
   a.decidedAt = new Date().toISOString();
   persistAll();
@@ -58,6 +78,7 @@ export function deny(id) {
 }
 
 export function getPending() {
+  for (const a of pending.values()) isExpired(a); // 惰性清理过期审批
   return [...pending.values()].filter((a) => a.status === 'pending');
 }
 

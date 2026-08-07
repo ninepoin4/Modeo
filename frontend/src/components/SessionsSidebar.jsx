@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Download, Upload, MessageSquare, Search, ChevronRight } from 'lucide-react';
+import { Plus, Download, Upload, MessageSquare, Search, ChevronRight, Trash2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip } from './ui/tooltip';
 import { api } from '../api';
@@ -24,7 +24,7 @@ function groupKey(s) {
 
 const GROUP_LABEL = { chat: '对话', code: '代码', roleplay: '角色', other: '其他' };
 
-export default function SessionsSidebar({ sessions, currentId, onOpen, onNew, onImport }) {
+export default function SessionsSidebar({ sessions, currentId, onOpen, onNew, onImport, onDelete }) {
   const fileRef = useRef(null);
   const [q, setQ] = useState('');
   const [collapsed, setCollapsed] = useState({});
@@ -128,6 +128,18 @@ export default function SessionsSidebar({ sessions, currentId, onOpen, onNew, on
                           {s.characterId ? ` · ${s.characterId}` : ''}
                         </span>
                         <span className="shrink-0">{relTime(s.updatedAt)}</span>
+                      </span>
+                      {/* 删除按钮：hover 显示，阻止冒泡避免触发打开会话 */}
+                      <span
+                        role="button"
+                        aria-label={`删除会话 ${s.title || '新会话'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete?.(s.id);
+                        }}
+                        className="absolute right-2 top-2 flex h-6 w-6 translate-y-0 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-red-600/10 hover:text-red-700 group-hover:opacity-100"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
                       </span>
                     </motion.button>
                   ))}

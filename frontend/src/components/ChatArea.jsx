@@ -109,8 +109,11 @@ export default function ChatArea({ session, messages, streaming, characterName, 
   const [suggestIndex, setSuggestIndex] = useState(0);
   const scrollRef = useRef(null);
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, streaming]);
+    // 仅在用户位于底部附近（showBottom=false）时自动跟随新消息；向上翻阅历史时不打扰
+    if (!showBottom) {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, [messages, streaming, showBottom]);
 
   const mode = session?.modeId || 'chat';
   const modeMeta = {
@@ -191,10 +194,12 @@ export default function ChatArea({ session, messages, streaming, characterName, 
               <button
                 data-testid="permission-toggle"
                 onClick={onPermissionChange}
+                disabled={streaming}
+                title={streaming ? '消息生成中，暂不可切换权限模式' : undefined}
                 className={
                   session?.permissionMode === 'aggressive'
-                    ? 'flex items-center gap-1 rounded-full border border-red-600/50 bg-red-600/10 px-2.5 py-1 text-xs text-red-700 transition-colors hover:bg-red-600/20'
-                    : 'flex items-center gap-1 rounded-full border border-line bg-card/60 px-2.5 py-1 text-xs text-muted transition-colors hover:border-ink/40 hover:text-ink'
+                    ? 'flex items-center gap-1 rounded-full border border-red-600/50 bg-red-600/10 px-2.5 py-1 text-xs text-red-700 transition-colors hover:bg-red-600/20 disabled:cursor-not-allowed disabled:opacity-50'
+                    : 'flex items-center gap-1 rounded-full border border-line bg-card/60 px-2.5 py-1 text-xs text-muted transition-colors hover:border-ink/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50'
                 }
               >
                 <span

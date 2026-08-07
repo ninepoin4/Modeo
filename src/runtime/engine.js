@@ -56,12 +56,27 @@ export function assembleSystemPrompt(harness, character, workspaceRoot, session 
   return sys || null;
 }
 
+/**
+ * 会话消息 → provider 视角（OpenAI 兼容格式）。
+ * 关键：assistant 的工具调用必须是标准 `tool_calls` 结构
+ * `{id, type:'function', function:{name, arguments:JSON串}}`，
+ * 而不是内部使用的 `toolCalls: [{id,name,args}]`——否则真实模型第二轮起 400。
+ * tool 结果消息只保留 role/content/tool_call_id（OpenAI 标准无 name 字段）。
+ */
 function cleanForProvider(m) {
   if (m.role === 'notice') return null;
   const out = { role: m.role, content: m.content };
-  if (m.toolCalls) out.toolCalls = m.toolCalls;
+  if (m.toolCalls && m.toolCalls.length) {
+    out.tool_calls = m.toolCalls.map((tc) => ({
+      id: tc.id,
+      type: 'function',
+      function: {
+        name: tc.name,
+        arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args || {}),
+      },
+    }));
+  }
   if (m.toolCallId) out.tool_call_id = m.toolCallId;
-  if (m.name) out.name = m.name;
   return out;
 }
 
@@ -124,7 +139,19 @@ export async function runAgentTurn(opts) {
   const approvalMode = aggressive ? 'none' : harness.approval?.mode || 'dangerous-only';
   const maxIterations = harness.context?.maxIterations || 8;
   const tools = (harness.tools || []).map((name) => toolRegistry.get(name)).filter(Boolean);
-  const baseCtx = { workspaceRoot, approvals, session, persist, aggressive };
+  // baseCtx 传递执行环境；spawn_agent 等协作型工具依赖 provider/toolRegistry/emit
+  const baseCtx = {
+    workspaceRoot,
+    approvals,
+    session,
+    persist,
+    aggressive,
+    provider,
+    toolRegistry,
+    harness,
+    settings,
+    emit,
+  };
 
   try {
     // 先重建 provider 视角的消息列表
@@ -145,8 +172,9 @@ export async function runAgentTurn(opts) {
           ? await tool.execute(pending.toolCall.args, ctx)
           : { output: `未知工具: ${pending.toolCall.name}`, isError: true };
         emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: pending.toolCall, result });
+        // 只补 tool 结果：包含该 toolCall 的 assistant 消息已在挂起审批时持久化（主循环），
+        // 若再 push 一条 assistant 会形成 A(X),A(X),T(X)，OpenAI 第二轮 400。
         session.messages.push(
-          msg('assistant', '', { id: randomUUID(), toolCalls: [pending.toolCall] }),
           msg('tool', result.output, { id: randomUUID(), toolCallId: pending.toolCall.id, name: pending.toolCall.name })
         );
       } else if (approval.status === 'denied') {
@@ -157,6 +185,10 @@ export async function runAgentTurn(opts) {
             name: pending.toolCall.name,
           })
         );
+      } else {
+        // 审批仍挂起或已过期：不清空 pendingApproval，报错引导用户先做决定
+        const msgText = approval.status === 'expired' ? '审批已超时，请重新发送消息发起操作' : '审批尚未处理，请先在弹窗中决定后再继续';
+        throw new Error(msgText);
       }
       session.pendingApproval = null;
       persist(session);
@@ -197,7 +229,10 @@ export async function runAgentTurn(opts) {
         });
         session.messages.push(assistantMsg);
         persist(session);
-        emit({ type: SSE_EVENTS.TOOL_CALL, toolCall: assistantMsg.toolCalls[0] });
+        // 逐个 emit 全部工具调用（前端逐条展示；之前只 emit 第一个）
+        for (const tc of assistantMsg.toolCalls) {
+          emit({ type: SSE_EVENTS.TOOL_CALL, toolCall: tc });
+        }
 
         let blocked = false;
         for (const tc of assistantMsg.toolCalls) {

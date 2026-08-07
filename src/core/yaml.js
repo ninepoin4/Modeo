@@ -115,15 +115,19 @@ export function parseYaml(text) {
 
   let idx = 0;
 
-  function parseBlock(indent) {
+  /** 嵌套深度上限：防深缩进导致调用栈溢出（4000+ 级缩进会爆栈） */
+  const MAX_DEPTH = 200;
+
+  function parseBlock(indent, depth = 0) {
+    if (depth > MAX_DEPTH) throw new YamlError('YAML 嵌套层级过深');
     if (idx >= lines.length) return null;
     const line = lines[idx];
     if (line.indent < indent) return null;
-    if (line.text.startsWith('-')) return parseSequence(indent);
-    return parseMap(indent);
+    if (line.text.startsWith('-')) return parseSequence(indent, depth);
+    return parseMap(indent, depth);
   }
 
-  function parseMap(indent) {
+  function parseMap(indent, depth = 0) {
     const obj = {};
     while (idx < lines.length) {
       const line = lines[idx];
@@ -140,7 +144,7 @@ export function parseYaml(text) {
       if (rest === '|' || rest === '>') {
         safeSet(obj, key, parseBlockScalar(indent, rest === '>'));
       } else if (rest === '') {
-        safeSet(obj, key, parseBlock(line.indent + 2));
+        safeSet(obj, key, parseBlock(line.indent + 2, depth + 1));
       } else {
         safeSet(obj, key, parseScalar(rest));
       }
@@ -162,7 +166,7 @@ export function parseYaml(text) {
     return -1;
   }
 
-  function parseSequence(indent) {
+  function parseSequence(indent, depth = 0) {
     const arr = [];
     while (idx < lines.length) {
       const line = lines[idx];
@@ -172,7 +176,7 @@ export function parseYaml(text) {
       const rest = line.text.slice(1).trim();
       idx++;
       if (rest === '') {
-        arr.push(parseBlock(indent + 2));
+        arr.push(parseBlock(indent + 2, depth + 1));
       } else if (rest.startsWith('-')) {
         const nested = [parseScalar(rest.slice(1).trim())];
         while (idx < lines.length && lines[idx].indent > indent && lines[idx].text.startsWith('-')) {
@@ -186,7 +190,7 @@ export function parseYaml(text) {
           const item = {};
           const k = parseScalar(rest.slice(0, colon));
           const v = rest.slice(colon + 1).trim();
-          safeSet(item, k, v === '' ? parseBlock(indent + 2) : parseScalar(v));
+          safeSet(item, k, v === '' ? parseBlock(indent + 2, depth + 1) : parseScalar(v));
           if (idx < lines.length && lines[idx].indent > indent && !lines[idx].text.startsWith('-')) {
             const cont = parseMap(lines[idx].indent);
             for (const [ck, cv] of Object.entries(cont)) safeSet(item, ck, cv);

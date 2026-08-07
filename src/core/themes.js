@@ -164,7 +164,17 @@ function safeId(s) {
   return String(s || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40);
 }
 
+/**
+ * 主题 id 白名单校验：与 safeId 结果完全一致才允许访问文件系统。
+ * 防路径穿越（.. / \ 等字符会被剔除导致不一致）。
+ */
+function assertValidId(id) {
+  const safe = safeId(id);
+  if (!safe || safe !== String(id || '')) throw new Error('主题 id 非法');
+}
+
 function themeFile(id) {
+  assertValidId(id);
   return path.join(THEMES_DIR, `${id}.json`);
 }
 

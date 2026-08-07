@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter, DialogClose } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -84,7 +84,13 @@ export default function SettingsDialog({
   const [editDraft, setEditDraft] = useState(null);
   const [importText, setImportText] = useState('');
 
-  useEffect(() => setDraft({ ...settings }), [settings]);
+  // 仅在弹窗挂载时初始化草稿；settings 后续变化（如主题切换）不同步，避免清空未保存编辑
+  const initRef = useRef(false);
+  useEffect(() => {
+    if (initRef.current) return;
+    initRef.current = true;
+    setDraft({ ...settings });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const customModes = (modes || []).filter((m) => !BUILTIN.includes(m.id));
   const currentTheme = themes.find((t) => t.id === themeId) || themes[0] || null;
@@ -100,7 +106,8 @@ export default function SettingsDialog({
   const save = async () => {
     try {
       // apiKey 未填写则传空字符串，服务端保留原值（脱敏设计）
-      const payload = { ...draft, apiKey: draft.apiKey || '' };
+      // theme 用当前 themeId 覆盖：draft 是挂载时快照，弹窗内切主题后不得被旧值回滚
+      const payload = { ...draft, apiKey: draft.apiKey || '', theme: themeId };
       const r = await api.saveSettings(payload);
       onSave(r.settings);
       onClose();

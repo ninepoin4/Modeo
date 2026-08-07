@@ -45,16 +45,27 @@ export async function compressSession({ session, provider, opts = {} }) {
     throw new Error(`消息太少（${significant.length} 条），至少需要 ${MIN} 条才值得压缩`);
   }
   const keepLast = Math.min(opts.keepLast ?? 4, significant.length - 1);
-  const toSummarize = significant.slice(0, significant.length - keepLast);
-  const recent = significant
-    .slice(significant.length - keepLast)
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({
-      role: m.role,
-      content: m.content || '',
-      id: m.id || randomUUID(),
-      ...(m.role === 'assistant' ? {} : { toolCalls: undefined }),
-    }));
+  // 保留最近 keepLast 条；若切点落在 tool 结果上（缺配对的 assistant 调用），
+  // 向前补全到包含该工具调用的 assistant 消息，避免压缩后工具上下文断裂。
+  let start = Math.max(0, significant.length - keepLast);
+  for (let i = start; i < significant.length; i++) {
+    if (significant[i].role !== 'tool') continue;
+    const tid = significant[i].toolCallId;
+    const pairIdx = significant
+      .slice(0, i)
+      .findIndex((m) => m.role === 'assistant' && (m.toolCalls || []).some((tc) => tc.id === tid));
+    if (pairIdx >= 0 && pairIdx < start) start = pairIdx;
+  }
+  const toSummarize = significant.slice(0, start);
+  const recent = significant.slice(start).map((m) => {
+    const out = { role: m.role, content: m.content || '', id: m.id || randomUUID() };
+    if (m.toolCalls && m.toolCalls.length) out.toolCalls = m.toolCalls;
+    if (m.toolCallId) {
+      out.toolCallId = m.toolCallId;
+      if (m.name) out.name = m.name;
+    }
+    return out;
+  });
 
   const transcript = buildTranscript(toSummarize).slice(0, MAX_TRANSCRIPT);
   const result = await provider.complete(
@@ -73,7 +84,7 @@ export async function compressSession({ session, provider, opts = {} }) {
       id: randomUUID(),
     }),
     msg('assistant', summary, { id: randomUUID() }),
-    ...recent.map((m) => (m.toolCalls === undefined ? { role: m.role, content: m.content, id: m.id } : m)),
+    ...recent,
   ];
   session.lastSummary = summary;
   session.updatedAt = new Date().toISOString();

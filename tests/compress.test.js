@@ -29,18 +29,26 @@ test('compress: 消息太少时抛错', async () => {
   await assert.rejects(() => compressSession({ session, provider: new MockProvider() }), /消息太少/);
 });
 
-test('compress: 摘要替换历史并保留最近消息', async () => {
+test('compress: 摘要替换历史并保留最近消息（含完整工具对）', async () => {
   const session = sampleSession();
   const result = await compressSession({ session, provider: new MockProvider() });
-  assert.equal(result.removedCount, 4);
-  assert.equal(result.recentCount, 3);
+  // 最近 4 条边界含一条 tool 结果 → 向前补全其 assistant 调用：保留 5 条、摘要 3 条
+  assert.equal(result.removedCount, 3);
+  assert.equal(result.recentCount, 5);
   assert.match(result.summary, /【历史摘要】/);
   assert.equal(session.lastSummary, result.summary);
   assert.equal(session.messages[0].role, 'notice');
   assert.equal(session.messages[1].role, 'assistant');
   assert.match(session.messages[1].content, /历史摘要/);
-  assert.ok(session.messages.slice(2).every((m) => m.role === 'user' || m.role === 'assistant'));
-  assert.ok(!session.messages.some((m) => m.role === 'tool'));
+  // 保留区不得出现"孤儿 tool 消息"：每个保留的 tool 结果都必须在保留的 assistant 消息中有配对调用
+  const kept = session.messages.slice(2);
+  const orphanToolIds = new Set(kept.filter((m) => m.role === 'tool').map((m) => m.toolCallId));
+  for (const m of kept) {
+    if (m.role === 'assistant' && m.toolCalls) {
+      for (const tc of m.toolCalls) orphanToolIds.delete(tc.id);
+    }
+  }
+  assert.equal(orphanToolIds.size, 0, '存在无配对调用的 tool 结果');
 });
 
 test('compress: buildTranscript 过滤 notice 并格式化消息', () => {

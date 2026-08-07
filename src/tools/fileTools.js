@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveSafePath, SandboxError } from './sandbox.js';
+import { isSensitiveAccess } from './shellTool.js';
 
 const MAX_READ = 2 * 1024 * 1024;
 
@@ -14,6 +15,20 @@ const MAX_READ = 2 * 1024 * 1024;
 function resolvePath(workspaceRoot, ctx, p) {
   if (ctx?.aggressive && path.isAbsolute(p)) return path.resolve(p);
   return resolveSafePath(workspaceRoot, p);
+}
+
+/**
+ * 敏感文件门禁：命中敏感路径（.env/.ssh/凭据等）且非无审批模式 → 需审批。
+ * 返回 { blocked, reason }；blocked 时上层返回 needsApproval。
+ */
+function sensitiveCheck(workspaceRoot, ctx, p) {
+  if (ctx?.aggressive || ctx?.forceApproved) return { blocked: false };
+  const target = path.isAbsolute(p) ? p : path.join(workspaceRoot, p);
+  const seg = `cat ${target}`;
+  if (isSensitiveAccess(seg)) {
+    return { blocked: true, reason: `访问敏感文件需审批：${p}` };
+  }
+  return { blocked: false };
 }
 
 function wrap(fn) {
@@ -52,6 +67,10 @@ export function createFileTools(workspaceRoot) {
       { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
       async ({ path: p } = {}, ctx = {}) => {
         if (!p) return { output: '缺少 path 参数', isError: true };
+        const gate = sensitiveCheck(workspaceRoot, ctx, p);
+        if (gate.blocked) {
+          return { output: `[敏感文件访问，等待审批] ${p}`, isError: false, needsApproval: true, approvalReason: gate.reason };
+        }
         const file = resolvePath(workspaceRoot, ctx, p);
         const st = fs.statSync(file);
         if (st.size > MAX_READ) {
@@ -68,6 +87,10 @@ export function createFileTools(workspaceRoot) {
       async ({ path: p, content } = {}, ctx = {}) => {
         if (!p) return { output: '缺少 path 参数', isError: true };
         if (typeof content !== 'string') return { output: 'content 必须是字符串', isError: true };
+        const gate = sensitiveCheck(workspaceRoot, ctx, p);
+        if (gate.blocked) {
+          return { output: `[敏感文件访问，等待审批] ${p}`, isError: false, needsApproval: true, approvalReason: gate.reason };
+        }
         const file = resolvePath(workspaceRoot, ctx, p);
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, content, 'utf8');
@@ -81,6 +104,10 @@ export function createFileTools(workspaceRoot) {
       async ({ path: p, oldString, newString } = {}, ctx = {}) => {
         if (!p || typeof oldString !== 'string' || typeof newString !== 'string') {
           return { output: '需要 path、oldString、newString 参数', isError: true };
+        }
+        const gate = sensitiveCheck(workspaceRoot, ctx, p);
+        if (gate.blocked) {
+          return { output: `[敏感文件访问，等待审批] ${p}`, isError: false, needsApproval: true, approvalReason: gate.reason };
         }
         const file = resolvePath(workspaceRoot, ctx, p);
         const content = fs.readFileSync(file, 'utf8');

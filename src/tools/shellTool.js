@@ -14,13 +14,15 @@ const MAX_OUTPUT = 64 * 1024;
 const DANGEROUS_PATTERNS = [
   // rm 递归删除（-r / -rf / -fr 等组合）；rm -f 单文件不算
   /\brm\s+-[a-z]*r[a-z]*\b/i,
+  // rm 长选项递归（--force 语义等同 -f 单文件，不算危险）
+  /\brm\s+--(?:recursive|no-preserve-root)\b/i,
   // rm 通配符删除
   /\brm\b[^\n]*\*/i,
   // Windows 递归删除目录
   /\b(?:rmdir|rd)\s+(?:\/[a-z]*[sq][a-z]*)?/i,
   // del/erase 删除（任何带 /s 递归，或带通配符；支持 /f /q /s 多选项组合）
   /\bdel(?:ete)?\s+(?:\/[a-z]{1,2}\s+)*[^\s]*\*/i,
-  /\bdel(?:ete)?\s+\/[a-z]*s/i,
+  /\bdel(?:ete)?\s+(?:\/[a-z]{1,2}\s+)*\/[a-z]*s/i,
   // PowerShell 递归/强制删除
   /\bremove-item\b[^\n]*(?:-recurse|-force)/i,
   // 格式化 / 创建文件系统
@@ -38,11 +40,20 @@ const DANGEROUS_PATTERNS = [
 /**
  * 敏感路径访问检测：读取/列出/复制 SSH 密钥、AWS 凭据、
  * 环境文件、本机设置等敏感位置 → 需审批（防数据泄露）。
+ * 注意：点目录（.ssh/.aws/.env）不用 \b（点前无词边界会漏检），
+ * 用路径定界符 [\w./\\] 边界匹配。
  */
 const SENSITIVE_PATH_PATTERNS = [
-  /(?:^|[;\s&|])(?:cat|type|more|less|head|tail|print|Get-Content|Copy-Item|cp|scp|curl|wget|Invoke-WebRequest|xcopy|robocopy)[^\n]*\b(?:id_rsa|id_ed25519|id_ecdsa|\.ssh|\.aws|credentials|\.env|\.env\.local|settings\.json|\.gnupg|\.pem|\.key)\b/i,
-  /(?:^|[;\s&|])(?:echo|print|Write-Output|Get-Content)[^\n]*\$env:[A-Z_]+(?:KEY|TOKEN|SECRET|PASSWORD)/i,
-  /(?:^|[;\s&|])(?:dir|ls|find|Get-ChildItem|tree)[^\n]*\b(?:\.ssh|\.aws|\.gnupg)\b/i,
+  // 读取/复制类命令 + 敏感路径 token（点目录/凭据文件）
+  // 注意：\.pem/\.key 不走此规则——它们带点，前一个字符若非分隔符会漏检（如 `cat app.pem`），
+  // 已拆分为下方独立规则（匹配任意文件名结尾的 .pem/.key）。
+  /(?:^|[;\s&|])(?:cat|type|more|less|head|tail|print|Get-Content|Copy-Item|cp|scp|curl|wget|Invoke-WebRequest|xcopy|robocopy)[^\n]*(?:[\s./\\]|^)(?:id_rsa|id_ed25519|id_ecdsa|\.ssh|\.aws|credentials|\.env|settings\.json|\.gnupg)\b/i,
+  // 私钥/证书文件：任意文件名以 .pem / .key 结尾（app.pem、x.key、server.key 等）
+  /(?:^|[;\s&|])(?:cat|type|more|less|head|tail|print|Get-Content|Copy-Item|cp|scp|curl|wget|Invoke-WebRequest|xcopy|robocopy)[^\n]*\.(?:pem|key)\b/i,
+  // 环境变量泄漏（Windows $env: / Unix $VAR）
+  /(?:^|[;\s&|])(?:echo|print|Write-Output|env|printenv|Get-Content)[^\n]*\$[A-Za-z_]+(?:KEY|TOKEN|SECRET|PASSWORD)/i,
+  // 列出敏感目录
+  /(?:^|[;\s&|])(?:dir|ls|find|Get-ChildItem|tree)[^\n]*(?:[\s./\\]|^)\.(?:ssh|aws|gnupg)\b/i,
 ];
 
 function isSensitiveAccess(command) {

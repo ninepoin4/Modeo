@@ -135,9 +135,37 @@ export function deletePack(id) {
   fs.unlinkSync(file);
 }
 
+/** 判断 host 是否为回环/链路本地/私网地址（SSRF 防护）；测试可经环境变量放行回环 */
+function isBlockedHost(hostname) {
+  if (process.env.MODEO_ALLOW_LOOPBACK === '1') return false;
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0') return true;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) {
+    const parts = h.split('.').map(Number);
+    if (parts[0] === 127) return true; // 127.0.0.0/8
+    if (parts[0] === 10) return true; // 10.0.0.0/8
+    if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12
+    if (parts[0] === 169 && parts[1] === 254) return true; // 169.254.0.0/16 链路本地
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true; // CGNAT
+    if (parts[0] === 0) return true;
+  }
+  return false;
+}
+
 async function downloadJson(url, { timeoutMs = 10000, maxBytes = 5 * 1024 * 1024 } = {}) {
   if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
     throw new PackError('仅支持 http/https 地址');
+  }
+  // SSRF 防护：拒绝回环/私网/链路本地地址（含云元数据 169.254.169.254）
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new PackError('URL 解析失败');
+  }
+  if (isBlockedHost(parsed.hostname)) {
+    throw new PackError('禁止访问内网/回环地址');
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

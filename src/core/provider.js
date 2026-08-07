@@ -22,7 +22,7 @@ export class MockProvider {
       const preview = String(last.content || '').slice(0, 120);
       return { content: `【mock-${modeId}】工具执行完毕，结果摘要：${preview}` };
     }
-    if (lastUser && /list files/i.test(lastUser.content)) {
+    if (lastUser && /(?:list files|list_dir)/i.test(lastUser.content)) {
       return {
         content: '',
         toolCalls: [{ id: 'mock-1', name: 'list_dir', args: { path: '.' } }],
@@ -59,6 +59,21 @@ export class MockProvider {
       return {
         content: '',
         toolCalls: [{ id: 'mock-4', name: 'review_changes', args: {} }],
+      };
+    }
+    if (lastUser && /(?:subagent|子代理|派.*任务|spawn)/i.test(lastUser.content)) {
+      return {
+        content: '',
+        toolCalls: [
+          {
+            id: 'mock-sa-1',
+            name: 'spawn_agent',
+            args: {
+              description: '探索工作区',
+              prompt: '用 list_dir 和 read_file 查看工作区根目录结构，返回：顶层目录清单、每个目录的用途推测、关键入口文件。',
+            },
+          },
+        ],
       };
     }
     if (lastUser && /ping/i.test(lastUser.content)) {

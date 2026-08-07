@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Undo2, TerminalSquare } from 'lucide-react';
+import { Undo2, TerminalSquare, Bot } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
@@ -33,6 +33,26 @@ export default function CodePanel({ toolLog, onUndo }) {
                       已创建快照
                     </div>
                     <p className="mt-1 break-all text-[11px] text-muted">{e.label}</p>
+                  </>
+                ) : e.type === 'subagent' ? (
+                  <>
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-ink">
+                      <Bot className="h-3.5 w-3.5 text-accent" />
+                      子代理{e.state === 'running' ? '运行中' : '完成'}
+                    </div>
+                    <p className="mt-1 break-all text-[11px] text-muted">{e.description}</p>
+                    {e.state === 'running' && (
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <span className="h-1 w-1 animate-pulse rounded-full bg-accent" />
+                        <span className="h-1 w-1 animate-pulse rounded-full bg-accent [animation-delay:150ms]" />
+                        <span className="h-1 w-1 animate-pulse rounded-full bg-accent [animation-delay:300ms]" />
+                      </div>
+                    )}
+                    {e.state === 'done' && e.result && (
+                      <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-paper2/70 p-2 font-mono text-[11px] text-ink-soft">
+                        {String(e.result).slice(0, 4000)}
+                      </pre>
+                    )}
                   </>
                 ) : (
                   <>

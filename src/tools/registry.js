@@ -6,6 +6,7 @@ import { createShellTool } from './shellTool.js';
 import { createWorldStateTool } from './worldStateTool.js';
 import { createRunTestsTool } from './runTestsTool.js';
 import { createReviewChangesTool } from './reviewChangesTool.js';
+import { createAgentTools } from './agentTools.js';
 
 export function createToolRegistry(toolDefs) {
   const map = new Map();
@@ -43,11 +44,17 @@ export function createCodeTools(workspaceRoot) {
 }
 
 /**
- * 全量工具注册表：Code 工具 + 世界状态工具。
+ * 全量工具注册表：Code 工具 + 世界状态工具 + 子代理工具 + 插件工具。
  * 暴露给模型哪些工具由各 harness 的 tools 列表决定，注册表本身包含全部实现。
  */
 export function createAllTools(workspaceRoot, extraTools = []) {
   const code = createCodeTools(workspaceRoot);
   const world = createWorldStateTool();
-  return createToolRegistry([...code.list().map((name) => code.get(name)), world, ...extraTools]);
+  const agents = createAgentTools();
+  return createToolRegistry([
+    ...code.list().map((name) => code.get(name)),
+    world,
+    agents.spawn_agent,
+    ...extraTools,
+  ]);
 }
