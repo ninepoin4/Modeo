@@ -1,6 +1,10 @@
 /**
  * Provider 抽象：Mock（离线演示/测试）与 OpenAI 兼容 API。
  */
+import { netFetch } from './net.js';
+
+/** 单次模型请求超时（毫秒）：防止模型端挂起导致 SSE 永挂、会话锁被长期占用 */
+const REQUEST_TIMEOUT_MS = 120000;
 
 export class MockProvider {
   constructor(settings = {}) {
@@ -104,7 +108,10 @@ export class OpenAIProvider {
   constructor(settings = {}) {
     this.id = 'openai';
     this.name = 'OpenAI 兼容 API';
-    this.baseUrl = String(settings.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+    // 兼容用户粘贴完整端点（.../chat/completions）或仅服务根地址
+    this.baseUrl = String(settings.baseUrl || 'https://api.openai.com/v1')
+      .replace(/\/+$/, '')
+      .replace(/\/chat\/completions$/i, '');
     this.apiKey = settings.apiKey || '';
     this.model = settings.model || 'gpt-4o-mini';
   }
@@ -116,24 +123,31 @@ export class OpenAIProvider {
       temperature: opts.temperature ?? 0.7,
     };
     if (opts.tools && opts.tools.length) body.tools = opts.tools;
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`OpenAI API ${res.status}: ${text.slice(0, 500)}`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await netFetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`OpenAI API ${res.status}: ${text.slice(0, 500)}`);
+      }
+      return res;
+    } finally {
+      clearTimeout(timer);
     }
-    return res;
   }
 
   async complete(messages, opts = {}) {
     const res = await this.#request(messages, opts);
-    const data = await res.json();
+    const data = JSON.parse(await res.text());
     const m = data.choices?.[0]?.message || {};
     return {
       content: m.content || '',
@@ -157,14 +171,22 @@ export class OpenAIProvider {
       stream: true,
     };
     if (opts.tools && opts.tools.length) body.tools = opts.tools;
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let res;
+    try {
+      res = await netFetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`OpenAI API ${res.status}: ${text.slice(0, 500)}`);

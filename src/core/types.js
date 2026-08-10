@@ -35,6 +35,25 @@ export function msg(role, content, extra = {}) {
   return { role, content, ...extra };
 }
 
+/**
+ * 会话消息 → Provider 标准格式（OpenAI Chat Completions）。
+ * 会话内部用 toolCalls（驼峰）/toolCallId 存储；发给模型前必须转为 tool_calls / tool_call_id。
+ * notice 消息（居中小灰字提示）不发给模型。
+ */
+export function cleanForProvider(m) {
+  if (m.role === 'notice') return null;
+  const out = { role: m.role, content: m.content };
+  if (m.toolCalls && m.toolCalls.length) {
+    out.tool_calls = m.toolCalls.map((tc) => ({
+      id: tc.id,
+      type: 'function',
+      function: { name: tc.name, arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args || {}) },
+    }));
+  }
+  if (m.toolCallId) out.tool_call_id = m.toolCallId;
+  return out;
+}
+
 /** 基础校验：harness 配置必须满足的最低要求 */
 export function validateHarnessShape(cfg) {
   const errors = [];

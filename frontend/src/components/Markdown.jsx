@@ -6,10 +6,43 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** URL 白名单：仅 http/https 外链与本地 /uploads/ 引用（拒绝 javascript: 等） */
+function safeUrl(url) {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (/^\/uploads\//.test(url)) return url;
+  return null;
+}
+
+const AUDIO_EXT = new Set(['mp3', 'wav', 'ogg', 'm4a']);
+const VIDEO_EXT = new Set(['mp4', 'webm', 'ogv', 'mov']);
+
+function mediaTag(url) {
+  const ext = url.split(/[?#]/)[0].match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  if (AUDIO_EXT.has(ext)) {
+    return `<audio controls preload="none" class="my-1.5 w-full max-w-md" src="${url}"></audio>`;
+  }
+  if (VIDEO_EXT.has(ext)) {
+    return `<video controls preload="none" class="my-1.5 max-h-80 w-full max-w-lg rounded-xl border border-line" src="${url}"></video>`;
+  }
+  return null;
+}
+
 function inline(text) {
   let t = escapeHtml(text);
-  // [text](url) -> 链接（仅 http/https）
-  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer" class="underline decoration-line underline-offset-4 hover:text-ink-soft">$1</a>');
+  // 图片 ![alt](url)
+  t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, url) => {
+    const safe = safeUrl(url);
+    if (!safe) return m;
+    return `<img src="${safe}" alt="${alt || ''}" loading="lazy" class="my-1.5 max-h-96 max-w-full rounded-xl border border-line" />`;
+  });
+  // 多媒体链接 [name](url) → 按扩展名渲染为 audio/video
+  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/uploads\/[^\s)]+)\)/g, (m, label, url) => {
+    const safe = safeUrl(url);
+    if (!safe) return m;
+    const media = mediaTag(safe);
+    if (media) return media;
+    return `<a href="${safe}" target="_blank" rel="noreferrer" class="underline decoration-line underline-offset-4 hover:text-ink-soft">${label}</a>`;
+  });
   // `code`
   t = t.replace(/`([^`]+)`/g, '<code class="rounded bg-paper2 px-1.5 py-0.5 font-mono text-[0.85em]">$1</code>');
   // **bold**

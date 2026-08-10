@@ -33,6 +33,7 @@ const WEB_DIR = path.join(ROOT, 'web');
 const PUBLIC_DIR = fs.existsSync(WEB_DIR) ? WEB_DIR : path.join(ROOT, 'public');
 const DATA_DIR = process.env.MODEO_DATA_DIR ? path.resolve(process.env.MODEO_DATA_DIR) : path.join(ROOT, 'data');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const WORKSPACE_ROOT = process.env.MODEO_WORKSPACE_DIR
   ? path.resolve(process.env.MODEO_WORKSPACE_DIR)
   : path.join(ROOT, 'workspaces', 'default');
@@ -40,6 +41,7 @@ const USER_HARNESS_DIR = path.join(DATA_DIR, 'harness');
 const PORT = Number(process.env.MODEO_PORT || 8787);
 
 fs.mkdirSync(path.join(DATA_DIR, 'sessions'), { recursive: true });
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(USER_HARNESS_DIR, { recursive: true });
 fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
 
@@ -127,15 +129,23 @@ function sendJson(res, status, data) {
   res.end(body);
 }
 
-function readBody(req, limit = 8 * 1024 * 1024) {
+function readBody(req, limit = 8 * 1024 * 1024, res = null) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
       if (size > limit) {
-        reject(new Error('请求体过大'));
+        // 先回 413 再断开，避免客户端只见断连无响应
+        if (res && !res.headersSent) {
+          try {
+            sendJson(res, 413, { error: '请求体过大' });
+          } catch {
+            /* 响应可能已被占用 */
+          }
+        }
         req.destroy();
+        reject(new Error('请求体过大'));
         return;
       }
       chunks.push(c);
@@ -145,8 +155,8 @@ function readBody(req, limit = 8 * 1024 * 1024) {
   });
 }
 
-async function readJson(req) {
-  const text = await readBody(req);
+async function readJson(req, res = null) {
+  const text = await readBody(req, undefined, res);
   if (!text) return {};
   try {
     return JSON.parse(text);
@@ -178,7 +188,9 @@ function withSessionLock(id, fn) {
       if (sessionLocks.get(id) === tracked) sessionLocks.delete(id);
     });
   sessionLocks.set(id, tracked);
-  return next;
+  // 返回吞错版本：fn 的 rejection 已在调用处转为错误响应，
+  // 此处保证不泄漏为 unhandled rejection（否则一个坏请求即可崩溃整个进程）。
+  return tracked;
 }
 
 /** 加载会话角色阵容（多角色支持） */
@@ -202,7 +214,7 @@ function loadCast(session) {
 async function handleMessages(req, res, id) {
   const session = getSessionOr404(res, id);
   if (!session) return;
-  const body = await readJson(req);
+  const body = await readJson(req, res);
   const content = String(body.content || '').trim();
   if (!content) return sendJson(res, 400, { error: '消息内容为空' });
 
@@ -278,8 +290,7 @@ async function handleMessages(req, res, id) {
 async function handleResume(req, res, id) {
   const session = getSessionOr404(res, id);
   if (!session) return;
-  const harness = harnesses.get(session.modeId);
-  if (!harness) return sendJson(res, 400, { error: '会话模式配置缺失' });
+  const harness = harnesses.get(session.modeId);  if (!harness) return sendJson(res, 400, { error: '会话模式配置缺失' });
   let character = null;
   if (session.characterId) {
     try {
@@ -339,7 +350,7 @@ function handlePrompt(res, id) {
     modeName: harness.name,
     systemPrompt,
     tools: harness.tools,
-    model: harness.defaultModel,
+    model: loadSettings().model || harness.defaultModel,
     messageCount: messages.length,
     messages,
   });
@@ -354,12 +365,57 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.ogv': 'video/ogg',
+  '.mov': 'video/quicktime',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8',
+  '.zip': 'application/zip',
 };
 
+/** 上传文件扩展名白名单（排除 html/svg/js 等可执行/可被浏览器直接执行脚本的类型） */
+const UPLOAD_ALLOWED_EXT = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
+  '.mp3', '.wav', '.ogg', '.m4a',
+  '.mp4', '.webm', '.ogv', '.mov',
+  '.pdf', '.txt', '.md', '.json', '.csv', '.zip',
+]);
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB
+/** body 上限：base64 膨胀约 4/3，放宽到 40MB 以便读到超限内容后返回 413 而非断开连接 */
+const UPLOAD_BODY_LIMIT = 40 * 1024 * 1024;
+
 function serveStatic(req, res, urlPath) {
+  if (urlPath.startsWith('/uploads/')) {
+    const rel = decodeURIComponent(urlPath.slice('/uploads/'.length));
+    if (!rel || rel.includes('\\')) return sendJson(res, 403, { error: 'forbidden' });
+    const target = path.normalize(path.join(UPLOADS_DIR, rel));
+    // 分隔符边界校验：防 /uploads/../uploads2/x 前缀同名越界
+    if (target !== UPLOADS_DIR && !target.startsWith(UPLOADS_DIR + path.sep)) return sendJson(res, 403, { error: 'forbidden' });
+    fs.readFile(target, (err, data) => {
+      if (err) return sendJson(res, 404, { error: 'not found' });
+      res.writeHead(200, {
+        'Content-Type': MIME[path.extname(target).toLowerCase()] || 'application/octet-stream',
+        'Cache-Control': 'private, max-age=86400',
+      });
+      res.end(data);
+    });
+    return;
+  }
   let rel = urlPath === '/' ? 'index.html' : decodeURIComponent(urlPath.slice(1));
   const target = path.normalize(path.join(PUBLIC_DIR, rel));
-  if (!target.startsWith(PUBLIC_DIR)) return sendJson(res, 403, { error: 'forbidden' });
+  if (target !== PUBLIC_DIR && !target.startsWith(PUBLIC_DIR + path.sep)) return sendJson(res, 403, { error: 'forbidden' });
   fs.readFile(target, (err, data) => {
     if (err) return sendJson(res, 404, { error: 'not found' });
     res.writeHead(200, { 'Content-Type': MIME[path.extname(target).toLowerCase()] || 'application/octet-stream' });
@@ -628,11 +684,21 @@ const server = http.createServer(async (req, res) => {
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/messages')) {
       const id = p.slice('/api/sessions/'.length, -'/messages'.length);
-      return withSessionLock(id, () => handleMessages(req, res, id));
+      return withSessionLock(id, () =>
+        handleMessages(req, res, id).catch((err) => {
+          if (!res.headersSent) sendJson(res, 400, { error: err.message || '消息处理失败' });
+          res.end();
+        })
+      );
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/resume')) {
       const id = p.slice('/api/sessions/'.length, -'/resume'.length);
-      return withSessionLock(id, () => handleResume(req, res, id));
+      return withSessionLock(id, () =>
+        handleResume(req, res, id).catch((err) => {
+          if (!res.headersSent) sendJson(res, 400, { error: err.message || '恢复处理失败' });
+          res.end();
+        })
+      );
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/switch-mode')) {
       const id = p.slice('/api/sessions/'.length, -'/switch-mode'.length);
@@ -682,7 +748,7 @@ const server = http.createServer(async (req, res) => {
         const result = await compressSession({
           session,
           provider: createProvider(settings),
-          opts: { model: harness.defaultModel || settings.model },
+          opts: { model: settings.model || harness.defaultModel },
         });
         sessionStore.saveSession(session);
         return sendJson(res, 200, { session, ...result });
@@ -918,6 +984,26 @@ const server = http.createServer(async (req, res) => {
     if (method === 'DELETE' && p.startsWith('/api/themes/')) {
       const id = decodeURIComponent(p.slice('/api/themes/'.length));
       return sendJson(res, 200, deleteTheme(id));
+    }
+    if (method === 'POST' && p === '/api/uploads') {
+      const body = JSON.parse(await readBody(req, UPLOAD_BODY_LIMIT));
+      const name = String(body.name || '').trim();
+      const data = String(body.data || '');
+      if (!name || !data) return sendJson(res, 400, { error: '缺少 name 或 data（base64）' });
+      if (data.length > UPLOAD_BODY_LIMIT) return sendJson(res, 413, { error: '文件过大（上限 20MB）' });
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return sendJson(res, 400, { error: 'data 不是有效的 base64' });
+      const buf = Buffer.from(data, 'base64');
+      if (!buf.length) return sendJson(res, 400, { error: 'data 不是有效的 base64' });
+      if (buf.length > MAX_UPLOAD_BYTES) return sendJson(res, 413, { error: '文件过大（上限 20MB）' });
+      const ext = path.extname(name).toLowerCase();
+      if (!UPLOAD_ALLOWED_EXT.has(ext)) {
+        return sendJson(res, 400, { error: `不支持的文件类型${ext ? '：' + ext : ''}（支持图片/音视频/PDF/文本/JSON/CSV/ZIP）` });
+      }
+      // 存储名：uuid 前缀 + 清洗后的原始文件名（保留可读性，防路径穿越）
+      const base = path.basename(name, ext).replace(/[^\w\u4e00-\u9fa5-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'file';
+      const filename = `${randomUUID().slice(0, 8)}-${base}${ext}`;
+      fs.writeFileSync(path.join(UPLOADS_DIR, filename), buf);
+      return sendJson(res, 201, { url: `/uploads/${filename}`, name: base + ext, size: buf.length, type: MIME[ext] || 'application/octet-stream' });
     }
     if (p.startsWith('/api/')) {
       return sendJson(res, 404, { error: '接口不存在' });

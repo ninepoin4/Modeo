@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { msg, SSE_EVENTS } from '../core/types.js';
+import { msg, SSE_EVENTS, cleanForProvider } from '../core/types.js';
 import { getEffectiveSystemPrompt, renderCharacterPrompt } from '../core/harness.js';
 import { createCheckpoint, writeCheckpointMeta } from '../tools/checkpoints.js';
 
@@ -57,28 +57,9 @@ export function assembleSystemPrompt(harness, character, workspaceRoot, session 
 }
 
 /**
- * 会话消息 → provider 视角（OpenAI 兼容格式）。
- * 关键：assistant 的工具调用必须是标准 `tool_calls` 结构
- * `{id, type:'function', function:{name, arguments:JSON串}}`，
- * 而不是内部使用的 `toolCalls: [{id,name,args}]`——否则真实模型第二轮起 400。
+ * 会话消息 → provider 视角（OpenAI 兼容格式），实现见 types.js cleanForProvider。
  * tool 结果消息只保留 role/content/tool_call_id（OpenAI 标准无 name 字段）。
  */
-function cleanForProvider(m) {
-  if (m.role === 'notice') return null;
-  const out = { role: m.role, content: m.content };
-  if (m.toolCalls && m.toolCalls.length) {
-    out.tool_calls = m.toolCalls.map((tc) => ({
-      id: tc.id,
-      type: 'function',
-      function: {
-        name: tc.name,
-        arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args || {}),
-      },
-    }));
-  }
-  if (m.toolCallId) out.tool_call_id = m.toolCallId;
-  return out;
-}
 
 function openAiToolDefs(tools) {
   return tools
@@ -201,7 +182,8 @@ export async function runAgentTurn(opts) {
       let content = '';
       let toolCalls = null;
       const stream = provider.stream(messages, {
-        model: harness.defaultModel || settings.model || 'mock',
+        // 用户全局设置优先；未配置时用模式的 defaultModel（如离线演示 mock）兜底
+        model: settings.model || harness.defaultModel || 'mock',
         modeId: harness.id,
         tools: openAiToolDefs(tools),
         temperature: settings.temperature ?? 0.7,

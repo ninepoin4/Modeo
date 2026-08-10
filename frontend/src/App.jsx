@@ -81,6 +81,10 @@ export default function App() {
   const charInputRef = useRef(null);
   const packInputRef = useRef(null);
   const abortRef = useRef(null);
+  // 当前活跃会话 id（用于异步回包防串台：done/权限切换的 fetch 回来时若已切会话则丢弃）
+  const activeSessionIdRef = useRef(null);
+  // 发送防抖（React 批处理窗口内防止双击重复提交）
+  const sendingRef = useRef(false);
 
   const refreshBase = useCallback(async () => {
     // 逐项容错：单项接口失败不拖垮整体初始化（如服务未完全就绪）
@@ -162,7 +166,9 @@ export default function App() {
     abortRef.current = null;
     setStreaming(false);
     setPendingApproval(null);
+    activeSessionIdRef.current = id;
     const r = await api.session(id);
+    if (activeSessionIdRef.current !== id) return; // 期间又切换了会话，丢弃过期回包
     setSession(r.session);
     setMessages(r.session.messages || []);
     setSelectedMode(r.session.modeId);
@@ -217,8 +223,11 @@ export default function App() {
         setStreaming(false);
         setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
         // done 后同步最终会话状态（后端可能补充标题/摘要），并刷新侧边栏列表
-        if (session?.id) {
-          api.session(session.id).then((r) => {
+        const doneSessionId = session?.id;
+        if (doneSessionId) {
+          api.session(doneSessionId).then((r) => {
+            // 防串台：期间若已切换到其他会话，丢弃过期回包
+            if (activeSessionIdRef.current !== doneSessionId) return;
             setSession(r.session);
             setMessages(r.session.messages || []);
           });
@@ -234,7 +243,9 @@ export default function App() {
 
   const sendMessage = useCallback(
     async (content) => {
-      if (!session || streaming) return;
+      // ref 镜像防抖：React 批处理窗口内连按 Enter 也只会发一次（state 闭包可能读到旧值）
+      if (!session || streaming || sendingRef.current) return;
+      sendingRef.current = true;
       setStreaming(true);
       setMessages((prev) => [...prev, { role: 'user', content, id: uid() }]);
       const controller = new AbortController();
@@ -247,7 +258,9 @@ export default function App() {
           setMessages((prev) => [...prev, { role: 'assistant', content: `请求失败：${e.message}`, id: uid() }]);
         }
       } finally {
-        abortRef.current = null;
+        // 只清理自己的 controller：避免旧流（abort/断流）的 finally 误清新流的停止能力
+        if (abortRef.current === controller) abortRef.current = null;
+        sendingRef.current = false;
       }
       setStreaming(false);
       // 兜底清除残留 streaming 标记（abort/断流时 done 事件可能未到达）
@@ -321,7 +334,7 @@ export default function App() {
           setMessages((prev) => [...prev, { role: 'assistant', content: `恢复失败：${e.message}（可重新发送消息继续）`, id: uid() }]);
         }
       } finally {
-        abortRef.current = null;
+        if (abortRef.current === controller) abortRef.current = null;
       }
       setStreaming(false);
     },
@@ -339,6 +352,7 @@ export default function App() {
       setToolLog([]);
       if (session) {
         const r = await api.switchMode(session.id, modeId);
+        activeSessionIdRef.current = session.id; // 模式切换仍是同一会话
         setSession(r.session);
         setMessages(r.session.messages || []);
       }
@@ -370,6 +384,7 @@ export default function App() {
             await refreshSessions();
             if (session?.id === id) {
               // 删除的是当前打开的会话：清空当前状态
+              activeSessionIdRef.current = null;
               setSession(null);
               setMessages([]);
               setToolLog([]);

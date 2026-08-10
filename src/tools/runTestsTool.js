@@ -9,6 +9,17 @@ import { spawn } from 'node:child_process';
 import { createShellTool, isDangerous } from './shellTool.js';
 
 /**
+ * test 脚本风险检测：isDangerous（rm/format 等）+ 间接执行任意脚本文件/编码绕过。
+ * 仅用于 run_tests 的 scripts.test（该字段本就是任意命令入口），不污染全局 shell 审批。
+ */
+export function isRiskyTestScript(script) {
+  if (isDangerous(script)) return true;
+  return /(?:\bnode\s+(?!-)[\w./\\-]+\.js\b|\b(?:python|python3|bash|sh|powershell|pwsh|cmd)\s+[\w./\\-]+\.(?:py|ps1|sh|cmd|bat|exe)\b|powershell\s+-(?:enc|encodedcommand)\b|base64\s+-d\b|curl\s+[^\s]+\s*\|\s*(?:sh|bash)\b)/i.test(
+    script
+  );
+}
+
+/**
  * 探测测试命令。返回 { type:'node'|'shell', command?, label, testScript? } 或 null。
  */
 export function detectTestCommand(workspaceRoot) {
@@ -42,8 +53,7 @@ export function detectTestCommand(workspaceRoot) {
   return null;
 }
 
-function runNodeTests(workspaceRoot, timeoutMs) {
-  return new Promise((resolve) => {
+function runNodeTests(workspaceRoot, timeoutMs) {  return new Promise((resolve) => {
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT; // 避免被外层测试运行器误判为递归
     const child = spawn(process.execPath || 'node', ['--test'], {
@@ -96,9 +106,9 @@ export function createRunTestsTool(workspaceRoot, shellTool) {
           isError: true,
         };
       }
-      // 安全闸门：npm test 的 scripts.test 是任意命令，命中危险模式必须先审批
+      // 安全闸门：npm test 的 scripts.test 是任意命令，命中危险/间接执行模式必须先审批
       // 无审批模式（aggressive）直接放行；已批准（forceApproved）也放行
-      if (detected.type === 'shell' && detected.testScript && isDangerous(detected.testScript)) {
+      if (detected.type === 'shell' && detected.testScript && isRiskyTestScript(detected.testScript)) {
         if (!ctx.forceApproved && !ctx.aggressive) {
           return {
             output: `[危险测试脚本，等待审批] npm test 将执行：${detected.testScript}`,

@@ -11,7 +11,7 @@
  * - 可观测性：emit child_agent_start / tool_call / tool_result / child_agent_end。
  */
 import { randomUUID } from 'node:crypto';
-import { msg, SSE_EVENTS } from '../core/types.js';
+import { msg, SSE_EVENTS, cleanForProvider } from '../core/types.js';
 
 /** 子代理工具定义转 OpenAI function 格式 */
 function openAiToolDefs(tools) {
@@ -111,8 +111,8 @@ export function createAgentTools() {
         for (let i = 0; i < maxIterations; i++) {
           let content = '';
           let toolCalls = null;
-          const stream = provider.stream(messages, {
-            model: harness?.defaultModel || settings?.model || 'mock',
+          const stream = provider.stream(messages.map(cleanForProvider).filter(Boolean), {
+            model: settings?.model || harness?.defaultModel || 'mock',
             modeId: harness?.id || 'code',
             tools: openAiToolDefs(childTools),
             temperature: settings?.temperature ?? 0.7,

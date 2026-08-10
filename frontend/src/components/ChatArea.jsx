@@ -1,12 +1,24 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, Send, Copy, Check, Square, ArrowDown } from 'lucide-react';
+import { Eye, Send, Copy, Check, Square, ArrowDown, Paperclip, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Tooltip } from './ui/tooltip';
 import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
+import { api } from '../api';
 import Markdown from './Markdown';
+
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']);
+const ACCEPT_ATTR = 'image/*,audio/*,video/*,.pdf,.txt,.md,.json,.csv,.zip';
+
+/** 根据扩展名决定插入的引用语法：图片用 ![]() 内联显示，其余用链接（渲染层按扩展名转播放器） */
+function mediaRef(upload) {
+  const ext = (upload.name.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
+  if (IMAGE_EXT.has(ext)) return `![${upload.name}](${upload.url})`;
+  return `[${upload.name}](${upload.url})`;
+}
 
 const SLASH_COMMANDS = [
   { id: 'goal', names: ['goal'], needsArg: true, hint: '设置会话目标（注入提示词，可在透明面板查看）' },
@@ -73,7 +85,9 @@ function Bubble({ m, streaming, delay }) {
           </button>
         )}
         {isUser ? (
-          <p className="text-[14.5px] leading-relaxed">{m.content}</p>
+          <div className="break-words font-serif text-[14.5px] leading-[1.85]">
+            <Markdown content={m.content} />
+          </div>
         ) : (
           <div className="msg-prose break-words">
             {streaming && !m.content && (
@@ -107,7 +121,39 @@ export default function ChatArea({ session, messages, streaming, characterName, 
   const [showBottom, setShowBottom] = useState(false);
   const [suggestDismissed, setSuggestDismissed] = useState(false);
   const [suggestIndex, setSuggestIndex] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const scrollRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const uploadFiles = useCallback(async (files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    setUploadError('');
+    setUploading(true);
+    try {
+      for (const f of list) {
+        if (f.size > MAX_FILE_BYTES) {
+          setUploadError(`「${f.name}」超过 20MB 上限，已跳过`);
+          continue;
+        }
+        const b64 = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result).split(',')[1] || '');
+          r.onerror = () => reject(new Error('读取文件失败'));
+          r.readAsDataURL(f);
+        });
+        const up = await api.uploadFile(f.name, b64);
+        setText((prev) => (prev ? `${prev}\n` : '') + mediaRef(up) + '\n');
+      }
+    } catch (e) {
+      setUploadError(`上传失败：${e.message}`);
+      setTimeout(() => setUploadError(''), 5000);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, []);
   useEffect(() => {
     // 仅在用户位于底部附近（showBottom=false）时自动跟随新消息；向上翻阅历史时不打扰
     if (!showBottom) {
@@ -273,7 +319,21 @@ export default function ChatArea({ session, messages, streaming, characterName, 
       </div>
 
       <footer className="border-t border-line bg-paper2/50 px-6 py-4">
-        <div className="relative mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-line bg-card p-2 shadow-paper focus-within:border-ink/40">
+        {uploadError && (
+          <p data-testid="upload-error" className="mx-auto mb-1.5 max-w-3xl text-center text-xs text-red-600">
+            {uploadError}
+          </p>
+        )}
+        <div
+          className="relative mx-auto flex max-w-3xl items-end gap-1.5 rounded-2xl border border-line bg-card p-2 shadow-paper focus-within:border-ink/40"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            if (streaming) return;
+            uploadFiles(e.dataTransfer?.files);
+          }}
+          title="支持拖拽文件到此处上传"
+        >
           {showSuggest && (
             <div
               data-testid="slash-menu"
@@ -295,6 +355,27 @@ export default function ChatArea({ session, messages, streaming, characterName, 
               ))}
             </div>
           )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept={ACCEPT_ATTR}
+            data-testid="file-input"
+            onChange={(e) => uploadFiles(e.target.files)}
+          />
+          <Tooltip content={uploading ? '上传中…' : '上传附件（图片/音频/视频/PDF/文本），支持拖拽或粘贴'}>
+            <Button
+              size="icon"
+              variant="ghost"
+              data-testid="attach"
+              disabled={streaming || uploading}
+              onClick={() => fileInputRef.current?.click()}
+              className="mb-0.5 text-muted"
+            >
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+            </Button>
+          </Tooltip>
           <Textarea
             data-testid="composer"
             rows={1}
@@ -303,6 +384,14 @@ export default function ChatArea({ session, messages, streaming, characterName, 
               setText(e.target.value);
               setSuggestDismissed(false);
               setSuggestIndex(0);
+            }}
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData?.files || []);
+              if (files.length) {
+                if (streaming) return; // 流式生成中不处理文件粘贴（与按钮/拖拽一致）
+                e.preventDefault();
+                uploadFiles(files);
+              }
             }}
             onKeyDown={(e) => {
               if (e.key === 'Escape' && showSuggest) {
