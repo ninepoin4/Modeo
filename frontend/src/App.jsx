@@ -319,7 +319,21 @@ export default function App() {
         return;
       }
       if (decision === 'deny') {
-        setMessages((prev) => [...prev, { role: 'assistant', content: '已拒绝该操作。', id: uid() }]);
+        // deny 后也 resume：引擎会补写 tool 消息（用户拒绝）并让模型继续回复，
+        // 避免 assistant(tool_calls) 孤立导致后续消息 400（历史断裂死锁）
+        setStreaming(true);
+        const controller = new AbortController();
+        abortRef.current = controller;
+        try {
+          await streamEvents(`/api/sessions/${session.id}/resume`, {}, handleStreamEvent, { signal: controller.signal });
+        } catch (e) {
+          if (e.name !== 'AbortError') {
+            setMessages((prev) => [...prev, { role: 'assistant', content: `恢复失败：${e.message}（可重新发送消息继续）`, id: uid() }]);
+          }
+        } finally {
+          if (abortRef.current === controller) abortRef.current = null;
+        }
+        setStreaming(false);
         return;
       }
       setStreaming(true);

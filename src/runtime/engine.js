@@ -94,7 +94,8 @@ function snapshotBefore(session, workspaceRoot, tc, emit) {
 /**
  * 执行一轮 Agent 对话。
  * opts: { session, harness, character, provider, toolRegistry, approvals,
- *         workspaceRoot, persist(session), emit(event), settings, resume }
+ *         workspaceRoot, persist(session), emit(event), settings, resume, signal }
+ * signal: 可选 AbortSignal——客户端断开/停止时中止本轮（provider 请求 + 循环退出）。
  * emit 事件：text_delta / tool_call / tool_result / approval_required / done / error
  */
 export async function runAgentTurn(opts) {
@@ -111,6 +112,7 @@ export async function runAgentTurn(opts) {
     emit,
     settings = {},
     resume = false,
+    signal = null,
   } = opts;
 
   const cast = characters && characters.length ? characters : character ? [character] : [];
@@ -132,6 +134,7 @@ export async function runAgentTurn(opts) {
     harness,
     settings,
     emit,
+    signal,
   };
 
   try {
@@ -178,6 +181,33 @@ export async function runAgentTurn(opts) {
       if (systemPrompt) messages = [msg('system', systemPrompt), ...messages];
     }
 
+    // 兜底（非 resume 新消息路径）：若存在残留 pendingApproval（前端 deny/过期后未调 resume、
+    // 或审批已失效），补写配对 tool 消息——避免 assistant(tool_calls) 孤立导致真实模型 400（会话锁死）。
+    if (!resume && session.pendingApproval) {
+      const pending = session.pendingApproval;
+      let status = 'missing';
+      try {
+        status = approvals.getApproval(pending.approvalId)?.status || 'missing';
+      } catch {
+        status = 'missing';
+      }
+      const reason =
+        status === 'approved'
+          ? '审批已通过但未恢复，操作未执行'
+          : status === 'denied'
+            ? '操作已被拒绝'
+            : status === 'expired'
+              ? '审批已超时，操作未执行'
+              : '审批记录缺失，操作未执行';
+      session.messages.push(
+        msg('tool', `[${reason}]`, { id: randomUUID(), toolCallId: pending.toolCall.id, name: pending.toolCall.name })
+      );
+      session.pendingApproval = null;
+      persist(session);
+      messages = session.messages.map(cleanForProvider).filter(Boolean);
+      if (systemPrompt) messages = [msg('system', systemPrompt), ...messages];
+    }
+
     for (let i = 0; i < maxIterations; i++) {
       let content = '';
       let toolCalls = null;
@@ -187,6 +217,7 @@ export async function runAgentTurn(opts) {
         modeId: harness.id,
         tools: openAiToolDefs(tools),
         temperature: settings.temperature ?? 0.7,
+        signal,
       });
 
       for await (const chunk of stream) {
@@ -216,7 +247,7 @@ export async function runAgentTurn(opts) {
           emit({ type: SSE_EVENTS.TOOL_CALL, toolCall: tc });
         }
 
-        let blocked = false;
+        let approvalPending = false;
         for (const tc of assistantMsg.toolCalls) {
           const tool = toolRegistry.get(tc.name);
           if (!tool) {
@@ -236,27 +267,36 @@ export async function runAgentTurn(opts) {
             needsApproval = approvalMode === 'dangerous-only' && result.needsApproval === true;
           }
           if (needsApproval) {
-            const approval = approvals.createApproval({
-              sessionId: session.id,
-              toolCall: tc,
-              summary: (result && result.approvalReason) || `${tc.name} ${JSON.stringify(tc.args)}`,
-            });
-            session.pendingApproval = { approvalId: approval.id, toolCall: tc };
-            persist(session);
-            emit({
-              type: SSE_EVENTS.APPROVAL_REQUIRED,
-              approvalId: approval.id,
-              toolCall: tc,
-              summary: approval.summary,
-            });
-            blocked = true;
-            break;
+            if (!approvalPending) {
+              // 第一个需审批工具：创建审批并挂起会话（同批其余工具继续执行，
+              // 避免 assistant.tool_calls 里的其他调用变孤儿导致真实模型 400）
+              const approval = approvals.createApproval({
+                sessionId: session.id,
+                toolCall: tc,
+                summary: (result && result.approvalReason) || `${tc.name} ${JSON.stringify(tc.args)}`,
+              });
+              session.pendingApproval = { approvalId: approval.id, toolCall: tc };
+              persist(session);
+              emit({
+                type: SSE_EVENTS.APPROVAL_REQUIRED,
+                approvalId: approval.id,
+                toolCall: tc,
+                summary: approval.summary,
+              });
+              approvalPending = true;
+            } else {
+              // 批内后续工具也需审批：pendingApproval 只能挂起一个，补 skip 消息保证配对合法
+              const r = { output: '[审批已挂起，此工具未执行]', isError: false };
+              session.messages.push(msg('tool', r.output, { id: randomUUID(), toolCallId: tc.id, name: tc.name }));
+              emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: tc, result: r });
+            }
+            continue; // 继续处理同批其余工具（候选 C：不再 break）
           }
           session.messages.push(msg('tool', result.output, { id: randomUUID(), toolCallId: tc.id, name: tc.name }));
           emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: tc, result });
         }
         persist(session);
-        if (blocked) return { status: 'waiting_approval' };
+        if (approvalPending) return { status: 'waiting_approval' };
         systemPrompt = assembleSystemPrompt(harness, cast, workspaceRoot, session);
         messages = session.messages.map(cleanForProvider).filter(Boolean);
         if (systemPrompt) messages = [msg('system', systemPrompt), ...messages];
@@ -275,6 +315,8 @@ export async function runAgentTurn(opts) {
     emit({ type: SSE_EVENTS.DONE, messageId: null, truncated: true });
     return { status: 'truncated' };
   } catch (err) {
+    // 客户端停止（abort）：不 emit error（前端已断开），静默返回，避免虚假错误提示
+    if (signal?.aborted) return { status: 'aborted' };
     emit({ type: SSE_EVENTS.ERROR, message: err.message || String(err) });
     return { status: 'error', message: err.message || String(err) };
   }

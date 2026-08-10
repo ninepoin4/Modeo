@@ -16,7 +16,7 @@
     "check": "node --check server.js && node --check src/core/types.js && node --check public/app.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.3"
   },
   "license": "MIT"
 }

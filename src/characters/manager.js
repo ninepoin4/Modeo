@@ -60,6 +60,13 @@ export function loadCharacter(id) {
   return normalizeCharacter({ ...obj, id });
 }
 
+/** 读取角色 YAML 原文（编辑器展示用；路径跟随 CHARACTER_DIR，与 loadCharacter 一致） */
+export function loadCharacterYaml(id) {
+  const file = charFile(id);
+  if (!fs.existsSync(file)) throw new CharacterError(`角色不存在: ${id}`);
+  return fs.readFileSync(file, 'utf8');
+}
+
 export function saveCharacter(yamlText) {
   if (typeof yamlText !== 'string' || !yamlText.trim()) throw new CharacterError('角色内容为空');
   let obj;

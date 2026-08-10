@@ -267,30 +267,50 @@ async function handleMessages(req, res, id) {
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+  // 客户端断开（停止按钮/关页面）→ abort 本轮：防止服务端继续跑完（耗 token、占锁）
+  // 注意：用 res.on('close') 而非 req.on('close')——Node 中 req close 在请求体接收完即触发一次，
+  // 客户端真正断开时不触发；res close 在连接关闭时可靠触发（正常 end 由 turnDone 保护）。
+  const abortCtl = new AbortController();
+  let turnDone = false;
   const emit = (e) => {
-    res.write(`data: ${JSON.stringify(e)}\n\n`);
+    if (res.destroyed) return;
+    try {
+      res.write(`data: ${JSON.stringify(e)}\n\n`);
+    } catch {
+      /* 连接已断，忽略 */
+    }
   };
-  res.write(`data: ${JSON.stringify({ type: 'session', session })}\n\n`);
-  await runAgentTurn({
-    session,
-    harness,
-    character,
-    characters: cast,
-    provider: createProvider(loadSettings()),
-    toolRegistry,
-    approvals: approvalsMgr,
-    workspaceRoot: WORKSPACE_ROOT,
-    persist: sessionStore.saveSession,
-    emit,
-    settings: loadSettings(),
+  res.on('close', () => {
+    if (!turnDone) abortCtl.abort();
   });
-  res.end();
+  res.on('error', () => {});
+  res.write(`data: ${JSON.stringify({ type: 'session', session })}\n\n`);
+  try {
+    await runAgentTurn({
+      session,
+      harness,
+      character,
+      characters: cast,
+      provider: createProvider(loadSettings()),
+      toolRegistry,
+      approvals: approvalsMgr,
+      workspaceRoot: WORKSPACE_ROOT,
+      persist: sessionStore.saveSession,
+      emit,
+      settings: loadSettings(),
+      signal: abortCtl.signal,
+    });
+  } finally {
+    turnDone = true;
+  }
+  if (!res.destroyed) res.end();
 }
 
 async function handleResume(req, res, id) {
   const session = getSessionOr404(res, id);
   if (!session) return;
-  const harness = harnesses.get(session.modeId);  if (!harness) return sendJson(res, 400, { error: '会话模式配置缺失' });
+  const harness = harnesses.get(session.modeId);
+  if (!harness) return sendJson(res, 400, { error: '会话模式配置缺失' });
   let character = null;
   if (session.characterId) {
     try {
@@ -305,22 +325,40 @@ async function handleResume(req, res, id) {
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
   });
-  const emit = (e) => res.write(`data: ${JSON.stringify(e)}\n\n`);
-  await runAgentTurn({
-    session,
-    harness,
-    character,
-    characters: cast,
-    provider: createProvider(loadSettings()),
-    toolRegistry,
-    approvals: approvalsMgr,
-    workspaceRoot: WORKSPACE_ROOT,
-    persist: sessionStore.saveSession,
-    emit,
-    settings: loadSettings(),
-    resume: true,
+  const abortCtl = new AbortController();
+  let turnDone = false;
+  const emit = (e) => {
+    if (res.destroyed) return;
+    try {
+      res.write(`data: ${JSON.stringify(e)}\n\n`);
+    } catch {
+      /* 连接已断，忽略 */
+    }
+  };
+  res.on('close', () => {
+    if (!turnDone) abortCtl.abort();
   });
-  res.end();
+  res.on('error', () => {});
+  try {
+    await runAgentTurn({
+      session,
+      harness,
+      character,
+      characters: cast,
+      provider: createProvider(loadSettings()),
+      toolRegistry,
+      approvals: approvalsMgr,
+      workspaceRoot: WORKSPACE_ROOT,
+      persist: sessionStore.saveSession,
+      emit,
+      settings: loadSettings(),
+      resume: true,
+      signal: abortCtl.signal,
+    });
+  } finally {
+    turnDone = true;
+  }
+  if (!res.destroyed) res.end();
 }
 
 function handlePrompt(res, id) {
@@ -437,6 +475,30 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ error: 'forbidden host' }));
   }
+  // CSRF 防护：浏览器跨站请求（Origin 存在且非同源）拒绝。
+  // 无 Origin（curl/脚本/同源 GET 等）与 Origin: null（Electron file:// 页面）放行。
+  const origin = String(req.headers.origin || '');
+  if (origin && origin !== 'null') {
+    let originOk = false;
+    try {
+      const o = new URL(origin);
+      const oh = o.hostname.toLowerCase();
+      // hostname 必须为本机回环，且端口（若携带）与 PORT 一致
+      const hostIsLocal = oh === '127.0.0.1' || oh === 'localhost' || oh === '::1';
+      const portOk = !o.port || Number(o.port) === PORT;
+      originOk = hostIsLocal && portOk;
+    } catch {
+      originOk = false;
+    }
+    if (!originOk) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: 'forbidden origin' }));
+    }
+  } else if (String(req.headers['sec-fetch-site'] || '') === 'cross-site') {
+    // Sec-Fetch-Site: cross-site 明确标记跨站（无 Origin 时兜底）
+    res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ error: 'forbidden origin' }));
+  }
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const p = url.pathname;
   const method = req.method;
@@ -507,16 +569,18 @@ const server = http.createServer(async (req, res) => {
     if (method === 'DELETE' && p.startsWith('/api/sessions/') && !p.slice('/api/sessions/'.length).includes('/')) {
       const id = p.slice('/api/sessions/'.length).split('/')[0];
       if (!id) return sendJson(res, 400, { error: '缺少会话 id' });
-      try {
-        sessionStore.deleteSession(id);
-        // 顺带清理该会话的快照与基线（目录不存在则跳过）
-        for (const dir of [path.join(DATA_DIR, 'checkpoints', id), path.join(DATA_DIR, 'baselines', id)]) {
-          fs.rmSync(dir, { recursive: true, force: true });
+      return withSessionLock(id, async () => {
+        try {
+          sessionStore.deleteSession(id);
+          // 顺带清理该会话的快照与基线（目录不存在则跳过）
+          for (const dir of [path.join(DATA_DIR, 'checkpoints', id), path.join(DATA_DIR, 'baselines', id)]) {
+            fs.rmSync(dir, { recursive: true, force: true });
+          }
+          return sendJson(res, 200, { ok: true });
+        } catch (err) {
+          return sendJson(res, 404, { error: err.message || '会话不存在' });
         }
-        return sendJson(res, 200, { ok: true });
-      } catch (err) {
-        return sendJson(res, 404, { error: err.message || '会话不存在' });
-      }
+      });
     }
     if (method === 'POST' && p === '/api/sessions') {
       const body = await readJson(req);
@@ -576,100 +640,112 @@ const server = http.createServer(async (req, res) => {
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/checkpoints/restore')) {
       const id = p.slice('/api/sessions/'.length, -'/checkpoints/restore'.length);
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      const body = await readJson(req);
-      try {
-        const restored = restoreCheckpoint({ sessionId: id, checkpointId: body.checkpointId, workspaceRoot: WORKSPACE_ROOT });
-        session.messages.push({
-          role: 'assistant',
-          content: `系统提示：已恢复快照（还原 ${restored.restoredFiles} 个文件）。`,
-          id: randomUUID(),
-        });
-        sessionStore.saveSession(session);
-        return sendJson(res, 200, { session, restored });
-      } catch (err) {
-        return sendJson(res, 400, { error: err.message || '恢复失败' });
-      }
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        const body = await readJson(req);
+        try {
+          const restored = restoreCheckpoint({ sessionId: id, checkpointId: body.checkpointId, workspaceRoot: WORKSPACE_ROOT });
+          session.messages.push({
+            role: 'assistant',
+            content: `系统提示：已恢复快照（还原 ${restored.restoredFiles} 个文件）。`,
+            id: randomUUID(),
+          });
+          sessionStore.saveSession(session);
+          return sendJson(res, 200, { session, restored });
+        } catch (err) {
+          return sendJson(res, 400, { error: err.message || '恢复失败' });
+        }
+      });
     }
     if (method === 'PUT' && p.startsWith('/api/sessions/') && p.endsWith('/world-state')) {
       const id = p.slice('/api/sessions/'.length, -'/world-state'.length);
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      const body = await readJson(req);
-      const ws =
-        session.worldState && typeof session.worldState === 'object' && !Array.isArray(session.worldState)
-          ? { ...session.worldState }
-          : {};
-      let changed = 0;
-      const source = body.worldState && typeof body.worldState === 'object' ? body.worldState : body.updates;
-      if (source && typeof source === 'object' && !Array.isArray(source)) {
-        for (const [k, v] of Object.entries(source)) {
-          if (k && typeof v === 'string' && v.trim()) {
-            ws[k.trim()] = v.trim();
-            changed++;
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        const body = await readJson(req);
+        const ws =
+          session.worldState && typeof session.worldState === 'object' && !Array.isArray(session.worldState)
+            ? { ...session.worldState }
+            : {};
+        let changed = 0;
+        const source = body.worldState && typeof body.worldState === 'object' ? body.worldState : body.updates;
+        if (source && typeof source === 'object' && !Array.isArray(source)) {
+          for (const [k, v] of Object.entries(source)) {
+            if (k && typeof v === 'string' && v.trim()) {
+              ws[k.trim()] = v.trim();
+              changed++;
+            }
           }
         }
-      }
-      if (!changed) return sendJson(res, 400, { error: '需要 worldState 或 updates 对象且至少一个非空值' });
-      session.worldState = ws;
-      sessionStore.saveSession(session);
-      return sendJson(res, 200, { session });
+        if (!changed) return sendJson(res, 400, { error: '需要 worldState 或 updates 对象且至少一个非空值' });
+        session.worldState = ws;
+        sessionStore.saveSession(session);
+        return sendJson(res, 200, { session });
+      });
     }
     if (method === 'DELETE' && p.startsWith('/api/sessions/') && p.endsWith('/world-state')) {
       const id = p.slice('/api/sessions/'.length, -'/world-state'.length);
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      session.worldState = {};
-      sessionStore.saveSession(session);
-      return sendJson(res, 200, { session });
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        session.worldState = {};
+        sessionStore.saveSession(session);
+        return sendJson(res, 200, { session });
+      });
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/characters')) {
       const id = p.slice('/api/sessions/'.length, -'/characters'.length);
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      const body = await readJson(req);
-      try {
-        charManager.loadCharacter(body.characterId);
-      } catch {
-        return sendJson(res, 400, { error: '角色不存在' });
-      }
-      const cast =
-        session.characters && session.characters.length
-          ? [...session.characters]
-          : session.characterId
-            ? [session.characterId]
-            : [];
-      if (!cast.includes(body.characterId)) cast.push(body.characterId);
-      session.characters = cast;
-      if (!session.characterId) session.characterId = body.characterId;
-      sessionStore.saveSession(session);
-      return sendJson(res, 200, { session });
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        const body = await readJson(req);
+        try {
+          charManager.loadCharacter(body.characterId);
+        } catch {
+          return sendJson(res, 400, { error: '角色不存在' });
+        }
+        const cast =
+          session.characters && session.characters.length
+            ? [...session.characters]
+            : session.characterId
+              ? [session.characterId]
+              : [];
+        if (!cast.includes(body.characterId)) cast.push(body.characterId);
+        session.characters = cast;
+        if (!session.characterId) session.characterId = body.characterId;
+        sessionStore.saveSession(session);
+        return sendJson(res, 200, { session });
+      });
     }
     if (method === 'DELETE' && p.startsWith('/api/sessions/') && p.includes('/characters/')) {
       const rest = p.slice('/api/sessions/'.length);
       const parts = rest.split('/');
       const id = parts[0];
       const characterId = parts[2];
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      session.characters = (session.characters || []).filter((c) => c !== characterId);
-      if (session.characterId === characterId) {
-        session.characterId = session.characters.length ? session.characters[0] : null;
-      }
-      sessionStore.saveSession(session);
-      return sendJson(res, 200, { session });
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        session.characters = (session.characters || []).filter((c) => c !== characterId);
+        if (session.characterId === characterId) {
+          session.characterId = session.characters.length ? session.characters[0] : null;
+        }
+        sessionStore.saveSession(session);
+        return sendJson(res, 200, { session });
+      });
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/active-character')) {
       const id = p.slice('/api/sessions/'.length, -'/active-character'.length);
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      const body = await readJson(req);
-      const cast = session.characters && session.characters.length ? session.characters : [session.characterId].filter(Boolean);
-      if (!cast.includes(body.characterId)) return sendJson(res, 400, { error: '角色不在阵容中' });
-      session.characterId = body.characterId;
-      sessionStore.saveSession(session);
-      return sendJson(res, 200, { session });
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        const body = await readJson(req);
+        const cast = session.characters && session.characters.length ? session.characters : [session.characterId].filter(Boolean);
+        if (!cast.includes(body.characterId)) return sendJson(res, 400, { error: '角色不在阵容中' });
+        session.characterId = body.characterId;
+        sessionStore.saveSession(session);
+        return sendJson(res, 200, { session });
+      });
     }
     if (method === 'GET' && p.startsWith('/api/sessions/') && p.endsWith('/export')) {
       const id = p.slice('/api/sessions/'.length, -'/export'.length);
@@ -702,66 +778,76 @@ const server = http.createServer(async (req, res) => {
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/switch-mode')) {
       const id = p.slice('/api/sessions/'.length, -'/switch-mode'.length);
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      const body = await readJson(req);
-      if (!harnesses.has(body.modeId)) return sendJson(res, 400, { error: '模式不存在' });
-      const updated = sessionStore.switchMode(session, body.modeId);
-      if (body.modeId === 'code') {
-        try {
-          ensureBaseline(id, WORKSPACE_ROOT);
-        } catch {
-          // 基线创建失败不阻断切换
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        const body = await readJson(req);
+        if (!harnesses.has(body.modeId)) return sendJson(res, 400, { error: '模式不存在' });
+        const updated = sessionStore.switchMode(session, body.modeId);
+        if (body.modeId === 'code') {
+          try {
+            ensureBaseline(id, WORKSPACE_ROOT);
+          } catch {
+            // 基线创建失败不阻断切换
+          }
         }
-      }
-      return sendJson(res, 200, { session: updated, mode: publicMode(harnesses.get(body.modeId)) });
+        return sendJson(res, 200, { session: updated, mode: publicMode(harnesses.get(body.modeId)) });
+      });
     }
     if (method === 'PUT' && p.startsWith('/api/sessions/') && p.endsWith('/goal')) {
       const id = p.slice('/api/sessions/'.length, -'/goal'.length);
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      const body = await readJson(req);
-      sessionStore.setGoal(session, body.goal);
-      return sendJson(res, 200, { session });
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        const body = await readJson(req);
+        sessionStore.setGoal(session, body.goal);
+        return sendJson(res, 200, { session });
+      });
     }
     if (method === 'PUT' && p.startsWith('/api/sessions/') && p.endsWith('/permission-mode')) {
       const id = p.slice('/api/sessions/'.length, -'/permission-mode'.length);
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      if (session.modeId !== 'code') return sendJson(res, 400, { error: '权限模式仅适用于 Code 模式会话' });
-      const body = await readJson(req);
-      // 切换到无审批模式（激进）需要显式确认标记，防 API 被任意调用开启
-      if (body.mode === 'aggressive' && body.confirm !== true) {
-        return sendJson(res, 400, { error: '切换到无审批模式需要 confirm: true 确认' });
-      }
-      const updated = sessionStore.setPermissionMode(session, body.mode);
-      return sendJson(res, 200, { session: updated });
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        if (session.modeId !== 'code') return sendJson(res, 400, { error: '权限模式仅适用于 Code 模式会话' });
+        const body = await readJson(req);
+        // 切换到无审批模式（激进）需要显式确认标记，防 API 被任意调用开启
+        if (body.mode === 'aggressive' && body.confirm !== true) {
+          return sendJson(res, 400, { error: '切换到无审批模式需要 confirm: true 确认' });
+        }
+        const updated = sessionStore.setPermissionMode(session, body.mode);
+        return sendJson(res, 200, { session: updated });
+      });
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/compress')) {
       const id = p.slice('/api/sessions/'.length, -'/compress'.length);
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      const harness = harnesses.get(session.modeId);
-      if (!harness) return sendJson(res, 400, { error: '会话模式配置缺失' });
-      try {
-        const settings = loadSettings();
-        const result = await compressSession({
-          session,
-          provider: createProvider(settings),
-          opts: { model: settings.model || harness.defaultModel },
-        });
-        sessionStore.saveSession(session);
-        return sendJson(res, 200, { session, ...result });
-      } catch (err) {
-        return sendJson(res, 400, { error: err.message || '压缩失败' });
-      }
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        const harness = harnesses.get(session.modeId);
+        if (!harness) return sendJson(res, 400, { error: '会话模式配置缺失' });
+        try {
+          const settings = loadSettings();
+          const result = await compressSession({
+            session,
+            provider: createProvider(settings),
+            opts: { model: settings.model || harness.defaultModel },
+          });
+          sessionStore.saveSession(session);
+          return sendJson(res, 200, { session, ...result });
+        } catch (err) {
+          return sendJson(res, 400, { error: err.message || '压缩失败' });
+        }
+      });
     }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/clear')) {
       const id = p.slice('/api/sessions/'.length, -'/clear'.length);
-      const session = getSessionOr404(res, id);
-      if (!session) return;
-      sessionStore.clearMessages(session);
-      return sendJson(res, 200, { session });
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        sessionStore.clearMessages(session);
+        return sendJson(res, 200, { session });
+      });
     }
     if (method === 'POST' && p === '/api/reset') {
       sessionStore.resetSessions();
@@ -920,7 +1006,7 @@ const server = http.createServer(async (req, res) => {
       const id = p.slice('/api/characters/'.length);
       try {
         const character = charManager.loadCharacter(id);
-        const yaml = fs.readFileSync(path.join(ROOT, 'characters', `${id}.yaml`), 'utf8');
+        const yaml = charManager.loadCharacterYaml(id);
         return sendJson(res, 200, { character, yaml });
       } catch (err) {
         return sendJson(res, 404, { error: err.message || '角色不存在' });

@@ -79,7 +79,7 @@ function connectTunnel(proxyUrl, targetHost, targetPort) {
   });
 }
 
-/** Node IncomingMessage → Web ReadableStream reader 兼容对象 */
+/** Node IncomingMessage → Web ReadableStream reader 兼容对象（error 时 reject，不吞错） */
 function nodeToReader(stream) {
   let ended = false;
   let errored = null;
@@ -95,15 +95,16 @@ function nodeToReader(stream) {
   });
   stream.on('error', (e) => {
     errored = e;
-    while (waiters.length) waiters.shift()({ done: true });
+    // 让等待中的 read() reject，调用方（provider 流式解析）能感知中断而非当作完整响应
+    while (waiters.length) waiters.shift()({ done: true, error: e });
   });
   return {
     read: () =>
-      new Promise((resolve) => {
+      new Promise((resolve, reject) => {
         if (pending.length) return resolve({ done: false, value: pending.shift() });
+        if (errored) return reject(errored);
         if (ended) return resolve({ done: true });
-        if (errored) return resolve({ done: true });
-        waiters.push(resolve);
+        waiters.push((r) => (r.error ? reject(r.error) : resolve(r)));
       }),
   };
 }

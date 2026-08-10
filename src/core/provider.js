@@ -173,6 +173,8 @@ export class OpenAIProvider {
     if (opts.tools && opts.tools.length) body.tools = opts.tools;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    // 合并外部停止信号（客户端停止按钮）与内部超时
+    const signal = opts.signal ? AbortSignal.any([controller.signal, opts.signal]) : controller.signal;
     let res;
     try {
       res = await netFetch(`${this.baseUrl}/chat/completions`, {
@@ -182,7 +184,7 @@ export class OpenAIProvider {
           Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal,
       });
     } finally {
       clearTimeout(timer);

@@ -69,7 +69,7 @@ export function createAgentTools() {
       if (!prompt) return { output: '缺少 prompt 参数', isError: true };
       const description = String(args.description || '子代理').slice(0, 40);
       const maxIterations = Math.min(Math.max(Number(args.maxIterations) || DEFAULT_MAX_ITERATIONS, 1), MAX_ITERATIONS_LIMIT);
-      const { provider, toolRegistry, workspaceRoot, approvals, session, persist, aggressive, harness, settings, emit } = ctx;
+      const { provider, toolRegistry, workspaceRoot, approvals, session, persist, aggressive, harness, settings, emit, signal } = ctx;
       if (!provider || !toolRegistry) {
         return { output: '子代理执行环境缺失（provider/toolRegistry）', isError: true };
       }
@@ -105,10 +105,15 @@ export function createAgentTools() {
       // 审批策略继承：approval.mode='all' 时子代理不承载审批流程——任何工具调用都终止交回主代理；
       // 'dangerous-only' 时由工具自身预检（needsApproval → 终止），保持与主代理一致。
       const approvalMode = harness?.approval?.mode || 'dangerous-only';
-      const childCtx = { workspaceRoot, approvals, session, persist, aggressive, approvalMode, emit };
+      const childCtx = { workspaceRoot, approvals, session, persist, aggressive, approvalMode, emit, signal };
 
       try {
         for (let i = 0; i < maxIterations; i++) {
+          if (signal?.aborted) {
+            // 停止信号（客户端停止/断开）：提前结束，不继续调模型
+            emit?.({ type: SSE_EVENTS.CHILD_AGENT_END, childId, description, result: '[子代理因停止信号中止]' });
+            return { output: '[子代理因停止信号中止]', isError: false };
+          }
           let content = '';
           let toolCalls = null;
           const stream = provider.stream(messages.map(cleanForProvider).filter(Boolean), {
@@ -116,6 +121,7 @@ export function createAgentTools() {
             modeId: harness?.id || 'code',
             tools: openAiToolDefs(childTools),
             temperature: settings?.temperature ?? 0.7,
+            signal,
           });
           for await (const chunk of stream) {
             if (chunk.type === 'text_delta') {
