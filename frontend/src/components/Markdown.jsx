@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, Copy, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 function escapeHtml(s) {
@@ -29,11 +29,11 @@ function mediaTag(url) {
 
 function inline(text) {
   let t = escapeHtml(text);
-  // 图片 ![alt](url)
+  // 图片 ![alt](url)：loading=lazy 懒加载 + max-h 缩略显示 + 点击查看原图（data-lightbox 事件委托）
   t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, url) => {
     const safe = safeUrl(url);
     if (!safe) return m;
-    return `<img src="${safe}" alt="${alt || ''}" loading="lazy" class="my-1.5 max-h-96 max-w-full rounded-xl border border-line" />`;
+    return `<img src="${safe}" alt="${alt || ''}" loading="lazy" data-lightbox="1" class="my-1.5 max-h-96 max-w-full cursor-zoom-in rounded-xl border border-line" />`;
   });
   // 多媒体链接 [name](url) → 按扩展名渲染为 audio/video
   t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/uploads\/[^\s)]+)\)/g, (m, label, url) => {
@@ -82,6 +82,25 @@ function CodeBlock({ code, lang }) {
 
 /** 轻量 Markdown：代码块 / 标题 / 引用 / 列表 / 段落 / 分隔线 + 内联格式 */
 export default function Markdown({ content }) {
+  const [zoom, setZoom] = useState(null);
+
+  // 事件委托：点图片（data-lightbox）打开原图查看
+  const handleClick = (e) => {
+    const t = e.target;
+    if (t?.tagName === 'IMG' && t.dataset?.lightbox) {
+      e.stopPropagation();
+      setZoom({ src: t.currentSrc || t.src, alt: t.alt || '' });
+    }
+  };
+
+  // lightbox 打开时监听 window 键盘（div 不可聚焦，React 合成事件收不到 ESC）
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e) => e.key === 'Escape' && setZoom(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoom]);
+
   const lines = String(content || '').split('\n');
   const blocks = [];
   let i = 0;
@@ -150,7 +169,7 @@ export default function Markdown({ content }) {
   };
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1" onClick={handleClick}>
       {blocks.map((b, idx) => {
         if (b.type === 'code') return <CodeBlock key={idx} code={b.code} lang={b.lang} />;
         if (b.type === 'quote')
@@ -170,6 +189,24 @@ export default function Markdown({ content }) {
           return <div key={idx} className={headClass[b.type]} dangerouslySetInnerHTML={{ __html: b.html }} />;
         return <p key={idx} className="min-h-[1.4em]" dangerouslySetInnerHTML={{ __html: b.html }} />;
       })}
+      {zoom && (
+        <div
+          data-testid="lightbox"
+          className="fixed inset-0 z-[100] flex cursor-zoom-out items-center justify-center bg-black/85 p-6"
+          onClick={() => setZoom(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white/80 transition-colors hover:bg-white/20"
+            onClick={() => setZoom(null)}
+            aria-label="关闭原图"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img src={zoom.src} alt={zoom.alt} className="max-h-[88vh] max-w-full rounded-xl object-contain shadow-2xl" />
+        </div>
+      )}
     </div>
   );
 }

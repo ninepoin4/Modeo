@@ -8,6 +8,7 @@ import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import { api } from '../api';
 import Markdown from './Markdown';
+import VirtualMessageList from './VirtualMessageList';
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']);
@@ -214,6 +215,15 @@ export default function ChatArea({ session, messages, streaming, characterName, 
       return;
     }
     setText('');
+    // 发送意图 = 要看回复：无论当前滚到哪，强制回到底部（聊天应用惯例），
+    // 否则虚拟滚动下 nearBottom=false 时新回复在视口外不可见。
+    // 用 scrollTop 同步赋值 + 手动 dispatch：scrollTo 的 scroll 事件在下一帧才触发，
+    // 会晚于新消息的 useEffect 判断，导致 nearBottom 仍是旧值而漏跟随。
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+      el.dispatchEvent(new Event('scroll'));
+    }
     onSend(v, modelOverride || undefined);
   };
 
@@ -330,40 +340,35 @@ export default function ChatArea({ session, messages, streaming, characterName, 
       </header>
 
       <div className="relative min-h-0 flex-1">
-      <div
-        ref={scrollRef}
-        data-testid="messages"
-        className="absolute inset-0 space-y-4 overflow-y-auto px-8 py-6"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          setShowBottom(el.scrollHeight - el.scrollTop - el.clientHeight > 120);
-        }}
-      >
-        <motion.div key={session?.modeId || 'chat'} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}>
-          <AnimatePresence initial={false}>
-            {messages.map((m, i) => (
-              <div key={m.id || `${m.role}-${i}`} className="mb-4">
-                <Bubble
-                  m={m}
-                  delay={Math.min(i * 0.03, 0.25)}
-                  streaming={streaming && i === messages.length - 1 && m.role === 'assistant'}
-                />
-              </div>
-            ))}
-          </AnimatePresence>
-        </motion.div>
-        {!messages.length && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="flex h-full flex-col items-center justify-center gap-2 text-center"
+        {messages.length === 0 ? (
+          <div className="absolute inset-0 overflow-y-auto px-8 py-6" data-testid="messages">
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              className="flex h-full flex-col items-center justify-center gap-2 text-center"
+            >
+              <p className="font-serif-display text-3xl tracking-[0.25em] text-ink/85">欢迎使用 Modeo</p>
+              <p className="max-w-sm text-sm text-muted">在下方输入消息开始。三种模式可随时切换，提示词全程透明可见。</p>
+            </motion.div>
+          </div>
+        ) : (
+          <VirtualMessageList
+            items={messages}
+            getKey={(m) => m.id || `${m.role}:${String(m.content || '').slice(0, 24)}`}
+            scrollRef={scrollRef}
+            className="absolute inset-0 px-8"
+            onNearBottom={(dist) => setShowBottom(dist > 120)}
           >
-            <p className="font-serif-display text-3xl tracking-[0.25em] text-ink/85">欢迎使用 Modeo</p>
-            <p className="max-w-sm text-sm text-muted">在下方输入消息开始。三种模式可随时切换，提示词全程透明可见。</p>
-          </motion.div>
+            {(m, i) => (
+              <Bubble
+                m={m}
+                delay={Math.min(i * 0.03, 0.25)}
+                streaming={streaming && i === messages.length - 1 && m.role === 'assistant'}
+              />
+            )}
+          </VirtualMessageList>
         )}
-      </div>
       <AnimatePresence>
         {showBottom && (
           <motion.button
