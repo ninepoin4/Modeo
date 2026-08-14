@@ -75,6 +75,7 @@ export const api = {
   themes: () => request('/api/themes'),
   saveTheme: (theme) => request('/api/themes', { method: 'POST', body: theme }),
   deleteTheme: (id) => request(`/api/themes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  uploadThemeBackground: (dataUrl) => request('/api/themes/background', { method: 'POST', body: { dataUrl } }),
   uploadFile: (name, data) => request('/api/uploads', { method: 'POST', body: { name, data } }),
 };
 

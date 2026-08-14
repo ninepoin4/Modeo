@@ -48,6 +48,28 @@ export function applyTheme(t) {
   document.body.style.backgroundSize = vars['--noise-bg'];
   root.dataset.theme = t.id || '';
   root.classList.toggle('dark', Boolean(t.dark));
+  // 皮肤背景图（音乐 App 式）：body 铺背景图 + 半透明遮罩保证文字可读。
+  // 遮罩色跟随主题基底（浅色皮肤用白、深色皮肤用黑），透明度由 dark 决定。
+  applySkinBackground(t);
+}
+
+/** 皮肤背景：body 上铺图片（cover）+ 遮罩层。背景图 URL 仅接受站内白名单路径 */
+export function applySkinBackground(t) {
+  const body = document.body;
+  const bg = t && typeof t.background === 'string' && t.background.startsWith('/themes/skins/') ? t.background : '';
+  if (!bg) {
+    // 移除 inline 背景让 CSS 规则（噪点纹理）回落生效；设 'none' 会永久压掉 body 噪点背景
+    body.style.backgroundImage = '';
+    body.style.setProperty('--skin-overlay', 'none');
+    return;
+  }
+  // 遮罩：深色主题黑色压暗（增强浅色文字对比），浅色主题白色提亮
+  const overlay = t.dark ? 'rgba(8, 10, 14, 0.55)' : 'rgba(250, 248, 244, 0.45)';
+  body.style.setProperty('--skin-overlay', overlay);
+  body.style.backgroundImage = `linear-gradient(${overlay}, ${overlay}), url("${bg}")`;
+  body.style.backgroundSize = 'cover';
+  body.style.backgroundPosition = 'center';
+  body.style.backgroundAttachment = 'fixed';
 }
 
 /** 阴影强度换算（tailwind shadow-paper / shadow-lift 基于此变量） */

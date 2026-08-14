@@ -27,7 +27,7 @@ import { normalizeCharacter, validateCharacter } from './src/characters/schema.j
 import { importCcv3, exportCcv3 } from './src/characters/ccv3.js';
 import { importCharacterCardFromPng } from './src/characters/png.js';
 import { buildPack, installPack, listPacks, getPack, savePackFile, deletePack, fetchPackJson, fetchMarketIndex, PackError } from './src/characters/pack.js';
-import { listThemes, getTheme, saveTheme, deleteTheme, BUILTIN_THEMES } from './src/core/themes.js';
+import { listThemes, getTheme, saveTheme, deleteTheme, uploadThemeBackground, BUILTIN_THEMES } from './src/core/themes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
@@ -454,6 +454,24 @@ const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB
 const UPLOAD_BODY_LIMIT = 40 * 1024 * 1024;
 
 function serveStatic(req, res, urlPath) {
+  if (urlPath.startsWith('/themes/skins/')) {
+    const SKINS_DIR = path.join(DATA_DIR, 'themes', 'skins');
+    const rel = decodeURIComponent(urlPath.slice('/themes/skins/'.length));
+    if (!rel || rel.includes('\\') || !/^[0-9a-f]{8}\.(png|jpe?g|webp|gif)$/.test(rel)) {
+      return sendJson(res, 403, { error: 'forbidden' });
+    }
+    const target = path.normalize(path.join(SKINS_DIR, rel));
+    if (target !== SKINS_DIR && !target.startsWith(SKINS_DIR + path.sep)) return sendJson(res, 403, { error: 'forbidden' });
+    fs.readFile(target, (err, data) => {
+      if (err) return sendJson(res, 404, { error: 'not found' });
+      res.writeHead(200, {
+        'Content-Type': MIME[path.extname(target).toLowerCase()] || 'application/octet-stream',
+        'Cache-Control': 'private, max-age=86400',
+      });
+      res.end(data);
+    });
+    return;
+  }
   if (urlPath.startsWith('/uploads/')) {
     const rel = decodeURIComponent(urlPath.slice('/uploads/'.length));
     if (!rel || rel.includes('\\')) return sendJson(res, 403, { error: 'forbidden' });
@@ -1103,6 +1121,12 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const theme = saveTheme(body);
       return sendJson(res, 201, { theme });
+    }
+    if (method === 'POST' && p === '/api/themes/background') {
+      const body = await readJson(req);
+      const r = uploadThemeBackground(body.dataUrl);
+      if (!r.ok) return sendJson(res, 400, { error: r.error });
+      return sendJson(res, 201, { url: r.url, size: r.size });
     }
     if (method === 'DELETE' && p.startsWith('/api/themes/')) {
       const id = decodeURIComponent(p.slice('/api/themes/'.length));

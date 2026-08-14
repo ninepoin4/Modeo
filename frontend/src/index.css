@@ -30,7 +30,9 @@
     font-feature-settings: "palt";
     background-image: radial-gradient(var(--noise) 1px, transparent 1px);
     background-size: 22px 22px;
-    transition: background-color 0.3s ease, color 0.3s ease;
+    background-position: center;
+    background-attachment: fixed;
+    transition: background-color 0.3s ease, color 0.3s ease, background-image 0.3s ease;
   }
   ::selection {
     background: rgba(20, 20, 20, 0.88);

@@ -9,6 +9,8 @@ import { useToast } from '../ui/toast';
 import { ConfirmDialog } from '../ui/confirm';
 import { applyTheme } from '../../lib/theme';
 import { cn } from '../../lib/utils';
+import { fileToDataUrl, loadImage, samplePixels, extractMainColor, buildSkinTheme } from '../../lib/skin';
+import { ImagePlus, Loader2 } from 'lucide-react';
 
 const BUILTIN = ['chat', 'code', 'roleplay'];
 const FONT_OPTIONS = [
@@ -83,6 +85,9 @@ export default function SettingsDialog({
   const [editId, setEditId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [importText, setImportText] = useState('');
+  const [skinDataUrl, setSkinDataUrl] = useState('');
+  const [skinName, setSkinName] = useState('');
+  const [skinBusy, setSkinBusy] = useState(false);
 
   // 仅在弹窗挂载时初始化草稿；settings 后续变化（如主题切换）不同步，避免清空未保存编辑
   const initRef = useRef(false);
@@ -218,6 +223,42 @@ export default function SettingsDialog({
     }
   };
 
+  /** 皮肤：选择背景图 → 本地预览（不上传，直到用户确认生成） */
+  const pickSkinFile = async (e) => {
+    const f = e.target?.files?.[0];
+    e.target.value = ''; // 允许重复选同一文件
+    if (!f) return;
+    try {
+      const dataUrl = await fileToDataUrl(f);
+      setSkinDataUrl(dataUrl);
+      setSkinName(f.name.replace(/\.[^.]+$/, '').slice(0, 24) || '皮肤');
+    } catch (err) {
+      toast(err.message || '图片读取失败', 'error');
+    }
+  };
+
+  /** 皮肤：上传背景图 → 取主色 → 生成主题 → 保存并应用（音乐 App 一键换肤） */
+  const generateSkin = async () => {
+    if (!skinDataUrl || skinBusy) return;
+    setSkinBusy(true);
+    try {
+      const img = await loadImage(skinDataUrl);
+      const main = extractMainColor(samplePixels(img));
+      const up = await api.uploadThemeBackground(skinDataUrl);
+      const theme = buildSkinTheme(main, { name: skinName.trim() || '皮肤', background: up.url });
+      const r = await api.saveTheme(theme);
+      await onThemesChanged();
+      await onThemeChange(r.theme.id);
+      toast('皮肤已应用——可点「编辑当前主题」手动微调', 'success');
+      setSkinDataUrl('');
+      setSkinName('');
+    } catch (e) {
+      toast('生成失败：' + e.message, 'error');
+    } finally {
+      setSkinBusy(false);
+    }
+  };
+
   return (
     <>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -275,6 +316,37 @@ export default function SettingsDialog({
                   <Button size="sm" variant="outline" onClick={() => saveEdit(true)}>存为新主题</Button>
                   <Button size="sm" onClick={() => saveEdit(false)}>保存</Button>
                 </div>
+              )}
+            </div>
+
+            {/* 背景皮肤（音乐 App 式）：上传背景图 → 自动取色生成匹配色板 */}
+            <div className="mb-3 rounded-2xl border border-dashed border-line bg-card/40 p-3">
+              <p className="mb-1 text-sm text-ink">背景皮肤</p>
+              <p className="mb-2 text-xs text-muted">
+                上传一张背景图，自动提取主色调生成匹配色板（也可再进「编辑当前主题」手动微调）。
+              </p>
+              <div className="flex items-center gap-2">
+                {skinDataUrl && (
+                  <img src={skinDataUrl} alt="背景预览" className="h-14 w-24 shrink-0 rounded-lg border border-line object-cover" />
+                )}
+                <label className="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-line bg-card px-3 text-xs text-ink-soft transition-colors hover:border-ink/40">
+                  <ImagePlus className="h-3.5 w-3.5" />
+                  选择背景图
+                  <input type="file" accept="image/*" hidden onChange={pickSkinFile} data-testid="skin-file" />
+                </label>
+                <Button size="sm" variant="outline" onClick={generateSkin} disabled={!skinDataUrl || skinBusy} data-testid="skin-generate">
+                  {skinBusy ? '生成中…' : '从图片生成配色'}
+                </Button>
+                {skinBusy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted" />}
+              </div>
+              {skinDataUrl && (
+                <Input
+                  value={skinName}
+                  onChange={(e) => setSkinName(e.target.value)}
+                  placeholder="皮肤主题名称"
+                  className="mt-2 h-8 text-xs"
+                  data-testid="skin-name"
+                />
               )}
             </div>
 

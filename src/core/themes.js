@@ -11,8 +11,16 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 const DATA_DIR = process.env.MODEO_DATA_DIR ? path.resolve(process.env.MODEO_DATA_DIR) : path.join(ROOT, 'data');
 const THEMES_DIR = path.join(DATA_DIR, 'themes');
+/** 皮肤背景图目录：data/themes/skins/（主题 background 字段指向这里） */
+const SKINS_DIR = path.join(THEMES_DIR, 'skins');
 
 fs.mkdirSync(THEMES_DIR, { recursive: true });
+fs.mkdirSync(SKINS_DIR, { recursive: true });
+
+/** 背景图扩展名白名单（排除 svg/html 等可执行/脚本类型） */
+const SKIN_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
+/** background 字段白名单：仅允许 /themes/skins/<uuid8>.<ext> */
+const BACKGROUND_RE = /^\/themes\/skins\/[0-9a-f]{8}\.(png|jpe?g|webp|gif)$/;
 
 /** 主题 token 全量键（颜色类） */
 const COLOR_KEYS = ['paper', 'paper2', 'ink', 'inkSoft', 'line', 'lineSoft', 'muted', 'card', 'accent'];
@@ -206,6 +214,10 @@ export function normalizeTheme(raw) {
     noiseDensity: clampInt(raw.noiseDensity, 0, 60, 22),
     shadowStrength: clampNum(raw.shadowStrength, 0, 1, 1),
   };
+  // 皮肤背景图（可选）：仅接受 /themes/skins/ 白名单路径，防任意 URL/路径注入
+  if (raw.background && BACKGROUND_RE.test(String(raw.background))) {
+    theme.background = String(raw.background);
+  }
   return { ok: true, theme };
 }
 
@@ -265,8 +277,40 @@ export function deleteTheme(id) {
   if (BUILTIN_THEMES.some((t) => t.id === id)) throw new Error('内置主题不可删除');
   const file = themeFile(id);
   if (!fs.existsSync(file)) throw new Error(`主题不存在: ${id}`);
+  // 顺带清理皮肤背景图文件（仅限白名单路径，防误删）
+  let bgDeleted = null;
+  try {
+    const t = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (t?.background && BACKGROUND_RE.test(String(t.background))) {
+      const bg = path.join(SKINS_DIR, path.basename(t.background));
+      if (fs.existsSync(bg)) {
+        fs.unlinkSync(bg);
+        bgDeleted = t.background;
+      }
+    }
+  } catch {
+    // 主题损坏不影响删除
+  }
   fs.unlinkSync(file);
-  return { deleted: id };
+  return { deleted: id, ...(bgDeleted ? { backgroundDeleted: bgDeleted } : {}) };
+}
+
+/**
+ * 上传皮肤背景图：接收 base64 data URL（"data:image/png;base64,..."），
+ * 存到 data/themes/skins/<uuid8>.<ext>，返回可被 serveStatic 服务的相对 URL。
+ */
+export function uploadThemeBackground(dataUrl) {
+  const m = String(dataUrl || '').match(/^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!m) return { ok: false, error: '必须是 data:image/...;base64 格式' };
+  const ext = m[1].toLowerCase() === 'jpeg' ? '.jpg' : `.${m[1].toLowerCase()}`;
+  if (!SKIN_EXT.has(ext)) return { ok: false, error: '不支持的图片格式（支持 png/jpg/webp/gif）' };
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length) return { ok: false, error: 'base64 解码失败' };
+  if (buf.length > 8 * 1024 * 1024) return { ok: false, error: '背景图过大（上限 8MB）' };
+  const filename = `${randomUUID().slice(0, 8)}${ext}`;
+  fs.mkdirSync(SKINS_DIR, { recursive: true });
+  fs.writeFileSync(path.join(SKINS_DIR, filename), buf);
+  return { ok: true, url: `/themes/skins/${filename}`, size: buf.length };
 }
 
 export { BUILTIN_THEMES, COLOR_KEYS };
