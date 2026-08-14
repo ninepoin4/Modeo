@@ -94,8 +94,13 @@ function snapshotBefore(session, workspaceRoot, tc, emit) {
 /**
  * 执行一轮 Agent 对话。
  * opts: { session, harness, character, provider, toolRegistry, approvals,
- *         workspaceRoot, persist(session), emit(event), settings, resume, signal }
+ *         workspaceRoot, persist(session), emit(event), settings, resume, signal,
+ *         toolPipeline }
  * signal: 可选 AbortSignal——客户端断开/停止时中止本轮（provider 请求 + 循环退出）。
+ * toolPipeline: 可选 { pre: [fn], post: [fn] }——工具执行管道钩子（dsh pre/execute/post 瀑布借鉴）：
+ *   pre(ctx, tc, args) → 可返回 { args } 改写参数 或 { abort, reason } 拦截该工具
+ *   post(ctx, tc, result) → 可返回 { result } 改写工具结果（审计/后处理）
+ * modelOverride: 可选字符串——本条消息指定模型（pi 模型接力思想），优先级高于 settings.model
  * emit 事件：text_delta / tool_call / tool_result / approval_required / done / error
  */
 export async function runAgentTurn(opts) {
@@ -113,6 +118,8 @@ export async function runAgentTurn(opts) {
     settings = {},
     resume = false,
     signal = null,
+    toolPipeline = { pre: [], post: [] },
+    modelOverride = null,
   } = opts;
 
   const cast = characters && characters.length ? characters : character ? [character] : [];
@@ -152,9 +159,15 @@ export async function runAgentTurn(opts) {
         const tool = toolRegistry.get(pending.toolCall.name);
         snapshotBefore(session, workspaceRoot, pending.toolCall, emit);
         const ctx = { ...baseCtx, forceApproved: true };
-        const result = tool
+        const raw = tool
           ? await tool.execute(pending.toolCall.args, ctx)
           : { output: `未知工具: ${pending.toolCall.name}`, isError: true };
+        // 工具管道 post 钩子（与主循环一致：审计/改写结果）
+        let result = raw;
+        for (const h of toolPipeline.post) {
+          const r = await h(ctx, pending.toolCall, result);
+          if (r?.result) result = r.result;
+        }
         emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: pending.toolCall, result });
         // 只补 tool 结果：包含该 toolCall 的 assistant 消息已在挂起审批时持久化（主循环），
         // 若再 push 一条 assistant 会形成 A(X),A(X),T(X)，OpenAI 第二轮 400。
@@ -212,8 +225,8 @@ export async function runAgentTurn(opts) {
       let content = '';
       let toolCalls = null;
       const stream = provider.stream(messages, {
-        // 用户全局设置优先；未配置时用模式的 defaultModel（如离线演示 mock）兜底
-        model: settings.model || harness.defaultModel || 'mock',
+        // 消息级 override（pi 模型接力）> 用户全局设置 > 模式 defaultModel（如离线演示 mock）兜底
+        model: modelOverride || settings.model || harness.defaultModel || 'mock',
         modeId: harness.id,
         tools: openAiToolDefs(tools),
         temperature: settings.temperature ?? 0.7,
@@ -257,30 +270,50 @@ export async function runAgentTurn(opts) {
             continue;
           }
           const ctx = baseCtx;
+          // ===== 工具管道 pre 钩子（可改写参数 / 拦截）=====
+          let effArgs = tc.args;
+          let blockedByHook = null;
+          for (const h of toolPipeline.pre) {
+            const r = await h(ctx, tc, effArgs);
+            if (!r) continue;
+            if (r.abort) {
+              blockedByHook = r.reason || '被钩子拦截';
+              break;
+            }
+            if (r.args && typeof r.args === 'object') effArgs = r.args;
+          }
+          if (blockedByHook) {
+            const r = { output: `[${blockedByHook}]`, isError: false };
+            session.messages.push(msg('tool', r.output, { id: randomUUID(), toolCallId: tc.id, name: tc.name }));
+            emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: tc, result: r });
+            continue;
+          }
           // 先判定是否需审批：all 模式任何工具都先审批；dangerous-only 模式由工具预检（危险命令不实际执行）
           let needsApproval = approvalMode === 'all';
           let result = null;
           if (!needsApproval) {
             // 变更型工具在预检执行前先打快照（撤销点）
             snapshotBefore(session, workspaceRoot, tc, emit);
-            result = await tool.execute(tc.args, ctx);
+            result = await tool.execute(effArgs, ctx);
             needsApproval = approvalMode === 'dangerous-only' && result.needsApproval === true;
           }
           if (needsApproval) {
             if (!approvalPending) {
               // 第一个需审批工具：创建审批并挂起会话（同批其余工具继续执行，
               // 避免 assistant.tool_calls 里的其他调用变孤儿导致真实模型 400）
+              // 审批挂起记录实际要执行的参数（pre 钩子改写后）
+              const approvalTc = effArgs !== tc.args ? { ...tc, args: effArgs } : tc;
               const approval = approvals.createApproval({
                 sessionId: session.id,
-                toolCall: tc,
-                summary: (result && result.approvalReason) || `${tc.name} ${JSON.stringify(tc.args)}`,
+                toolCall: approvalTc,
+                summary: (result && result.approvalReason) || `${approvalTc.name} ${JSON.stringify(approvalTc.args)}`,
               });
-              session.pendingApproval = { approvalId: approval.id, toolCall: tc };
+              session.pendingApproval = { approvalId: approval.id, toolCall: approvalTc };
               persist(session);
               emit({
                 type: SSE_EVENTS.APPROVAL_REQUIRED,
                 approvalId: approval.id,
-                toolCall: tc,
+                toolCall: approvalTc,
                 summary: approval.summary,
               });
               approvalPending = true;
@@ -292,8 +325,14 @@ export async function runAgentTurn(opts) {
             }
             continue; // 继续处理同批其余工具（候选 C：不再 break）
           }
-          session.messages.push(msg('tool', result.output, { id: randomUUID(), toolCallId: tc.id, name: tc.name }));
-          emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: tc, result });
+          // ===== 工具管道 post 钩子（可改写结果 / 审计）=====
+          let out = result;
+          for (const h of toolPipeline.post) {
+            const r = await h(ctx, tc, out);
+            if (r?.result) out = r.result;
+          }
+          session.messages.push(msg('tool', out.output, { id: randomUUID(), toolCallId: tc.id, name: tc.name }));
+          emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: tc, result: out });
         }
         persist(session);
         if (approvalPending) return { status: 'waiting_approval' };

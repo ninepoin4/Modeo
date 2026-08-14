@@ -1,0 +1,13 @@
+{"ts":"2026-08-14T01:23:39.286Z","type":"user_message","messageId":"27c7ae46-638e-4614-844e-98ee4cbfc8cb","content":"ping"}
+{"ts":"2026-08-14T01:23:39.287Z","type":"tool_call","toolCall":{"id":"mock-5","name":"ping","args":{"echo":"hi"}}}
+{"ts":"2026-08-14T01:23:39.288Z","type":"tool_result","toolCall":{"id":"mock-5","name":"ping","args":{"echo":"hi"}},"result":{"output":"pong 2026-08-14T01:23:39.288Z | echo: hi","isError":false}}
+{"ts":"2026-08-14T01:23:39.289Z","type":"text_delta","delta":"【mock-pl"}
+{"ts":"2026-08-14T01:23:39.290Z","type":"text_delta","delta":"ugin-mod"}
+{"ts":"2026-08-14T01:23:39.290Z","type":"text_delta","delta":"e】工具执行完毕"}
+{"ts":"2026-08-14T01:23:39.290Z","type":"text_delta","delta":"，结果摘要：po"}
+{"ts":"2026-08-14T01:23:39.291Z","type":"text_delta","delta":"ng 2026-"}
+{"ts":"2026-08-14T01:23:39.291Z","type":"text_delta","delta":"08-14T01"}
+{"ts":"2026-08-14T01:23:39.291Z","type":"text_delta","delta":":23:39.2"}
+{"ts":"2026-08-14T01:23:39.291Z","type":"text_delta","delta":"88Z | ec"}
+{"ts":"2026-08-14T01:23:39.291Z","type":"text_delta","delta":"ho: hi"}
+{"ts":"2026-08-14T01:23:39.291Z","type":"done","messageId":"1bea86da-a803-4921-b171-b1a5aa109f1e"}

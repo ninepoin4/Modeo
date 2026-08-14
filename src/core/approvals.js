@@ -55,11 +55,16 @@ export function isExpired(a) {
   return false;
 }
 
-export function approve(id, sessionId) {
+export function approve(id, sessionId, argsOverride) {
   const a = pending.get(id);
   if (!a) throw new Error('审批不存在');
   if (sessionId && a.sessionId !== sessionId) throw new Error('审批不属于当前会话');
   if (isExpired(a)) throw new Error('审批已超时，请重新发起操作');
+  // 用户可在审批弹窗中编辑工具参数后再批准（pi Steering 思想）：
+  // 覆盖 toolCall.args 后，引擎 resume 执行时用新参数
+  if (argsOverride && typeof argsOverride === 'object' && !Array.isArray(argsOverride)) {
+    a.toolCall = { ...a.toolCall, args: argsOverride };
+  }
   a.status = 'approved';
   a.decidedAt = new Date().toISOString();
   persistAll();

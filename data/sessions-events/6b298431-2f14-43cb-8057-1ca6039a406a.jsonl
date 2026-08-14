@@ -1,0 +1,79 @@
+{"ts":"2026-08-14T01:23:39.299Z","type":"user_message","messageId":"42f9514f-a029-405a-b776-885f37ab00da","content":"你好"}
+{"ts":"2026-08-14T01:23:39.300Z","type":"text_delta","delta":"【mock-ch"}
+{"ts":"2026-08-14T01:23:39.300Z","type":"text_delta","delta":"at】你好"}
+{"ts":"2026-08-14T01:23:39.300Z","type":"done","messageId":"88c0cad2-7076-4634-b3f8-cf209ef80d76"}
+{"ts":"2026-08-14T01:23:39.339Z","type":"user_message","messageId":"2acf1b1e-eb82-4e7f-9f2a-dad2737ef8fd","content":"list files"}
+{"ts":"2026-08-14T01:23:39.340Z","type":"tool_call","toolCall":{"id":"mock-1","name":"list_dir","args":{"path":"."}}}
+{"ts":"2026-08-14T01:23:39.341Z","type":"tool_result","toolCall":{"id":"mock-1","name":"list_dir","args":{"path":"."}},"result":{"output":"[file] .gitkeep","isError":false}}
+{"ts":"2026-08-14T01:23:39.342Z","type":"text_delta","delta":"【mock-co"}
+{"ts":"2026-08-14T01:23:39.342Z","type":"text_delta","delta":"de】工具执行完"}
+{"ts":"2026-08-14T01:23:39.342Z","type":"text_delta","delta":"毕，结果摘要：["}
+{"ts":"2026-08-14T01:23:39.342Z","type":"text_delta","delta":"file] .g"}
+{"ts":"2026-08-14T01:23:39.343Z","type":"text_delta","delta":"itkeep"}
+{"ts":"2026-08-14T01:23:39.343Z","type":"done","messageId":"09a76898-57b0-491e-8ce4-ce00ac5deedf"}
+{"ts":"2026-08-14T01:23:39.347Z","type":"user_message","messageId":"3d6ccfa8-5a05-4fd6-9557-e0d28368ac74","content":"write file"}
+{"ts":"2026-08-14T01:23:39.348Z","type":"tool_call","toolCall":{"id":"mock-2","name":"write_file","args":{"path":"demo.txt","content":"hello"}}}
+{"ts":"2026-08-14T01:23:39.350Z","type":"checkpoint","checkpoint":{"id":"1786670619348-3d6d5b61","label":"write_file {\"path\":\"demo.txt\",\"content\":\"hello\"}","createdAt":"2026-08-14T01:23:39.349Z"}}
+{"ts":"2026-08-14T01:23:39.352Z","type":"tool_result","toolCall":{"id":"mock-2","name":"write_file","args":{"path":"demo.txt","content":"hello"}},"result":{"output":"已写入 demo.txt（5 字节）","isError":false}}
+{"ts":"2026-08-14T01:23:39.353Z","type":"text_delta","delta":"【mock-co"}
+{"ts":"2026-08-14T01:23:39.353Z","type":"text_delta","delta":"de】工具执行完"}
+{"ts":"2026-08-14T01:23:39.353Z","type":"text_delta","delta":"毕，结果摘要：已"}
+{"ts":"2026-08-14T01:23:39.353Z","type":"text_delta","delta":"写入 demo."}
+{"ts":"2026-08-14T01:23:39.354Z","type":"text_delta","delta":"txt（5 字节"}
+{"ts":"2026-08-14T01:23:39.354Z","type":"text_delta","delta":"）"}
+{"ts":"2026-08-14T01:23:39.354Z","type":"done","messageId":"bb0246bf-6d1c-4ccb-9faa-b30592aca765"}
+{"ts":"2026-08-14T01:23:39.361Z","type":"user_message","messageId":"c7edde4a-d94f-41e8-90b4-90f2f6b8ed03","content":"run tests"}
+{"ts":"2026-08-14T01:23:39.362Z","type":"tool_call","toolCall":{"id":"mock-3","name":"run_tests","args":{}}}
+{"ts":"2026-08-14T01:23:39.590Z","type":"tool_result","toolCall":{"id":"mock-3","name":"run_tests","args":{}},"result":{"output":"测试命令：node --test（tests/*.test.js）\nTAP version 13\n# Subtest: smoke-ok\nok 1 - smoke-ok\n  ---\n  duration_ms: 1.0998\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 117.3551\n","isError":false,"needsApproval":false}}
+{"ts":"2026-08-14T01:23:39.591Z","type":"text_delta","delta":"【mock-co"}
+{"ts":"2026-08-14T01:23:39.591Z","type":"text_delta","delta":"de】工具执行完"}
+{"ts":"2026-08-14T01:23:39.591Z","type":"text_delta","delta":"毕，结果摘要：测"}
+{"ts":"2026-08-14T01:23:39.591Z","type":"text_delta","delta":"试命令：node"}
+{"ts":"2026-08-14T01:23:39.591Z","type":"text_delta","delta":" --test（"}
+{"ts":"2026-08-14T01:23:39.591Z","type":"text_delta","delta":"tests/*."}
+{"ts":"2026-08-14T01:23:39.591Z","type":"text_delta","delta":"test.js）"}
+{"ts":"2026-08-14T01:23:39.592Z","type":"text_delta","delta":"\nTAP ver"}
+{"ts":"2026-08-14T01:23:39.592Z","type":"text_delta","delta":"sion 13\n"}
+{"ts":"2026-08-14T01:23:39.592Z","type":"text_delta","delta":"# Subtes"}
+{"ts":"2026-08-14T01:23:39.592Z","type":"text_delta","delta":"t: smoke"}
+{"ts":"2026-08-14T01:23:39.592Z","type":"text_delta","delta":"-ok\nok 1"}
+{"ts":"2026-08-14T01:23:39.592Z","type":"text_delta","delta":" - smoke"}
+{"ts":"2026-08-14T01:23:39.592Z","type":"text_delta","delta":"-ok\n  --"}
+{"ts":"2026-08-14T01:23:39.592Z","type":"text_delta","delta":"-\n  dura"}
+{"ts":"2026-08-14T01:23:39.592Z","type":"text_delta","delta":"tion_ms:"}
+{"ts":"2026-08-14T01:23:39.593Z","type":"text_delta","delta":" 1.0998\n"}
+{"ts":"2026-08-14T01:23:39.593Z","type":"text_delta","delta":"  type:"}
+{"ts":"2026-08-14T01:23:39.593Z","type":"done","messageId":"f1a82f1c-72ae-469b-88ae-9d15e6d4331f"}
+{"ts":"2026-08-14T01:23:39.595Z","type":"user_message","messageId":"fd4d20e6-308f-4035-b26b-a6fccdf9be1d","content":"write file"}
+{"ts":"2026-08-14T01:23:39.596Z","type":"tool_call","toolCall":{"id":"mock-2","name":"write_file","args":{"path":"demo.txt","content":"hello"}}}
+{"ts":"2026-08-14T01:23:39.598Z","type":"checkpoint","checkpoint":{"id":"1786670619597-8c4953a7","label":"write_file {\"path\":\"demo.txt\",\"content\":\"hello\"}","createdAt":"2026-08-14T01:23:39.598Z"}}
+{"ts":"2026-08-14T01:23:39.600Z","type":"tool_result","toolCall":{"id":"mock-2","name":"write_file","args":{"path":"demo.txt","content":"hello"}},"result":{"output":"已写入 demo.txt（5 字节）","isError":false}}
+{"ts":"2026-08-14T01:23:39.601Z","type":"text_delta","delta":"【mock-co"}
+{"ts":"2026-08-14T01:23:39.601Z","type":"text_delta","delta":"de】工具执行完"}
+{"ts":"2026-08-14T01:23:39.601Z","type":"text_delta","delta":"毕，结果摘要：已"}
+{"ts":"2026-08-14T01:23:39.601Z","type":"text_delta","delta":"写入 demo."}
+{"ts":"2026-08-14T01:23:39.601Z","type":"text_delta","delta":"txt（5 字节"}
+{"ts":"2026-08-14T01:23:39.601Z","type":"text_delta","delta":"）"}
+{"ts":"2026-08-14T01:23:39.602Z","type":"done","messageId":"363f0ffc-704c-4ea3-9457-bf89c85b2556"}
+{"ts":"2026-08-14T01:23:39.603Z","type":"user_message","messageId":"4773de16-dff4-4ccb-9d19-32b792499296","content":"review changes"}
+{"ts":"2026-08-14T01:23:39.604Z","type":"tool_call","toolCall":{"id":"mock-4","name":"review_changes","args":{}}}
+{"ts":"2026-08-14T01:23:39.605Z","type":"tool_result","toolCall":{"id":"mock-4","name":"review_changes","args":{}},"result":{"output":"变更审查（相对最近快照）：新增 1，修改 0，删除 1；+1 / -4 行\n\n--- a/.meta.json\n+++ b/.meta.json\n-{\n-  \"label\": \"write_file {\\\"path\\\":\\\"demo.txt\\\",\\\"content\\\":\\\"hello\\\"}\",\n-  \"createdAt\": \"2026-08-14T01:23:39.598Z\"\n-}\n--- a/demo.txt\n+++ b/demo.txt\n+hello","isError":false}}
+{"ts":"2026-08-14T01:23:39.606Z","type":"text_delta","delta":"【mock-co"}
+{"ts":"2026-08-14T01:23:39.606Z","type":"text_delta","delta":"de】工具执行完"}
+{"ts":"2026-08-14T01:23:39.606Z","type":"text_delta","delta":"毕，结果摘要：变"}
+{"ts":"2026-08-14T01:23:39.606Z","type":"text_delta","delta":"更审查（相对最近"}
+{"ts":"2026-08-14T01:23:39.606Z","type":"text_delta","delta":"快照）：新增 1"}
+{"ts":"2026-08-14T01:23:39.606Z","type":"text_delta","delta":"，修改 0，删除"}
+{"ts":"2026-08-14T01:23:39.606Z","type":"text_delta","delta":" 1；+1 / "}
+{"ts":"2026-08-14T01:23:39.606Z","type":"text_delta","delta":"-4 行\n\n--"}
+{"ts":"2026-08-14T01:23:39.607Z","type":"text_delta","delta":"- a/.met"}
+{"ts":"2026-08-14T01:23:39.607Z","type":"text_delta","delta":"a.json\n+"}
+{"ts":"2026-08-14T01:23:39.607Z","type":"text_delta","delta":"++ b/.me"}
+{"ts":"2026-08-14T01:23:39.607Z","type":"text_delta","delta":"ta.json\n"}
+{"ts":"2026-08-14T01:23:39.607Z","type":"text_delta","delta":"-{\n-  \"l"}
+{"ts":"2026-08-14T01:23:39.607Z","type":"text_delta","delta":"abel\": \""}
+{"ts":"2026-08-14T01:23:39.607Z","type":"text_delta","delta":"write_fi"}
+{"ts":"2026-08-14T01:23:39.607Z","type":"text_delta","delta":"le {\\\"pa"}
+{"ts":"2026-08-14T01:23:39.608Z","type":"text_delta","delta":"th\\\":\\\"d"}
+{"ts":"2026-08-14T01:23:39.608Z","type":"text_delta","delta":"emo.txt"}
+{"ts":"2026-08-14T01:23:39.608Z","type":"done","messageId":"51e0cd56-0df7-4611-b3b3-a072548a2c32"}

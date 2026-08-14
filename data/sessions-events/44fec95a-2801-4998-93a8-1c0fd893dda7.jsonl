@@ -1,0 +1,35 @@
+{"ts":"2026-08-14T01:23:39.313Z","type":"user_message","messageId":"5f7a1b45-962b-4812-8944-4481f47cce7b","content":"第 0 条消息"}
+{"ts":"2026-08-14T01:23:39.314Z","type":"text_delta","delta":"【mock-ch"}
+{"ts":"2026-08-14T01:23:39.314Z","type":"text_delta","delta":"at】第 0 条"}
+{"ts":"2026-08-14T01:23:39.314Z","type":"text_delta","delta":"消息"}
+{"ts":"2026-08-14T01:23:39.314Z","type":"done","messageId":"b5fc8184-a2e5-4dca-96fe-8d04081d5a1e"}
+{"ts":"2026-08-14T01:23:39.316Z","type":"user_message","messageId":"75cb3727-9f94-47c7-8a61-9eb968382812","content":"第 1 条消息"}
+{"ts":"2026-08-14T01:23:39.317Z","type":"text_delta","delta":"【mock-ch"}
+{"ts":"2026-08-14T01:23:39.317Z","type":"text_delta","delta":"at】第 1 条"}
+{"ts":"2026-08-14T01:23:39.317Z","type":"text_delta","delta":"消息"}
+{"ts":"2026-08-14T01:23:39.318Z","type":"done","messageId":"7af22add-bb03-4cea-b832-eb48f2eb86a6"}
+{"ts":"2026-08-14T01:23:39.319Z","type":"user_message","messageId":"d8113e6d-5c14-4243-86f9-fbae3fadcae1","content":"第 2 条消息"}
+{"ts":"2026-08-14T01:23:39.320Z","type":"text_delta","delta":"【mock-ch"}
+{"ts":"2026-08-14T01:23:39.320Z","type":"text_delta","delta":"at】第 2 条"}
+{"ts":"2026-08-14T01:23:39.320Z","type":"text_delta","delta":"消息"}
+{"ts":"2026-08-14T01:23:39.320Z","type":"done","messageId":"58686f89-f0c9-48db-ab86-f9e4c1d9326f"}
+{"ts":"2026-08-14T01:23:39.322Z","type":"user_message","messageId":"f2a786ce-c158-49b1-bb82-76bfca5bf263","content":"第 3 条消息"}
+{"ts":"2026-08-14T01:23:39.322Z","type":"text_delta","delta":"【mock-ch"}
+{"ts":"2026-08-14T01:23:39.323Z","type":"text_delta","delta":"at】第 3 条"}
+{"ts":"2026-08-14T01:23:39.323Z","type":"text_delta","delta":"消息"}
+{"ts":"2026-08-14T01:23:39.323Z","type":"done","messageId":"11a26493-4b10-4136-b6ed-da28a656a320"}
+{"ts":"2026-08-14T01:23:39.324Z","type":"user_message","messageId":"0e162f99-f8ef-4fed-bcfd-9e2df36b5ea6","content":"第 4 条消息"}
+{"ts":"2026-08-14T01:23:39.325Z","type":"text_delta","delta":"【mock-ch"}
+{"ts":"2026-08-14T01:23:39.325Z","type":"text_delta","delta":"at】第 4 条"}
+{"ts":"2026-08-14T01:23:39.325Z","type":"text_delta","delta":"消息"}
+{"ts":"2026-08-14T01:23:39.325Z","type":"done","messageId":"a6d15609-156a-406c-a7c9-c75c118db66d"}
+{"ts":"2026-08-14T01:23:39.326Z","type":"user_message","messageId":"09f02e6a-f750-48a4-81bb-75db9cf7ee14","content":"第 5 条消息"}
+{"ts":"2026-08-14T01:23:39.327Z","type":"text_delta","delta":"【mock-ch"}
+{"ts":"2026-08-14T01:23:39.327Z","type":"text_delta","delta":"at】第 5 条"}
+{"ts":"2026-08-14T01:23:39.327Z","type":"text_delta","delta":"消息"}
+{"ts":"2026-08-14T01:23:39.327Z","type":"done","messageId":"d9ffb7a4-184f-4450-a0d9-dbbc56b9c97d"}
+{"ts":"2026-08-14T01:23:39.328Z","type":"user_message","messageId":"85dca5a7-0154-437e-8bc7-3310099023b8","content":"第 6 条消息"}
+{"ts":"2026-08-14T01:23:39.329Z","type":"text_delta","delta":"【mock-ch"}
+{"ts":"2026-08-14T01:23:39.329Z","type":"text_delta","delta":"at】第 6 条"}
+{"ts":"2026-08-14T01:23:39.329Z","type":"text_delta","delta":"消息"}
+{"ts":"2026-08-14T01:23:39.330Z","type":"done","messageId":"bfa45efd-1c74-4419-9494-e9a17a63ec40"}

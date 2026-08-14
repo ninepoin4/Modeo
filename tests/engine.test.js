@@ -238,3 +238,104 @@ test('engine: notice 消息不会发给模型', async () => {
   });
   assert.ok(events.some((e) => e.type === 'done'));
 });
+
+test('engine: 工具管道 pre 钩子改写参数、post 钩子改写结果、abort 拦截', async () => {
+  const session = makeSession('code');
+  session.messages.push({ role: 'user', content: 'write file please', id: 'u1' });
+  const harness = harnesses.find((h) => h.id === 'code');
+  // 清理先前测试残留（共用 wsRoot），避免断言误判
+  for (const f of ['demo.txt', 'hook.txt']) fs.rmSync(path.join(wsRoot, f), { force: true });
+  const seen = [];
+  const pipeline = {
+    pre: [
+      async (_ctx, tc, args) => {
+        seen.push(['pre', tc.name, JSON.stringify(args)]);
+        // 把 write_file 的 path 改写为 hook.txt
+        if (tc.name === 'write_file') return { args: { ...args, path: 'hook.txt' } };
+        return null;
+      },
+    ],
+    post: [
+      async (_ctx, tc, result) => {
+        seen.push(['post', tc.name, result.isError]);
+        return { result: { ...result, output: `[audited]${result.output}` } };
+      },
+    ],
+  };
+  const events = await collectEvents({
+    session,
+    harness,
+    character: null,
+    provider: new MockProvider(),
+    toolRegistry: createCodeTools(wsRoot),
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: {},
+    toolPipeline: pipeline,
+  });
+  // pre 钩子改写生效：写的是 hook.txt 而非 demo.txt
+  assert.ok(fs.existsSync(path.join(wsRoot, 'hook.txt')), 'pre 钩子改写的路径应被写入');
+  assert.ok(!fs.existsSync(path.join(wsRoot, 'demo.txt')), '原路径不应被写入');
+  // post 钩子改写生效：tool_result 输出带审计前缀
+  const tr = events.find((e) => e.type === 'tool_result');
+  assert.match(tr.result.output, /^\[audited\]/);
+  // pre/post 均被调用
+  assert.ok(seen.some((s) => s[0] === 'pre' && s[1] === 'write_file'));
+  assert.ok(seen.some((s) => s[0] === 'post' && s[1] === 'write_file'));
+  // 消息落盘也是改写后的输出
+  const reloaded = store.getSession(session.id);
+  assert.ok(reloaded.messages.some((m) => m.role === 'tool' && m.content.startsWith('[audited]')));
+});
+
+test('engine: 工具管道 pre 钩子 abort 拦截工具', async () => {
+  const session = makeSession('code');
+  session.messages.push({ role: 'user', content: 'write file please', id: 'u1' });
+  const harness = harnesses.find((h) => h.id === 'code');
+  fs.rmSync(path.join(wsRoot, 'demo.txt'), { force: true });
+  const pipeline = {
+    pre: [async () => ({ abort: true, reason: '策略拦截：禁止写文件' })],
+    post: [],
+  };
+  const events = await collectEvents({
+    session,
+    harness,
+    character: null,
+    provider: new MockProvider(),
+    toolRegistry: createCodeTools(wsRoot),
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: {},
+    toolPipeline: pipeline,
+  });
+  assert.ok(!fs.existsSync(path.join(wsRoot, 'demo.txt')), '被拦截的工具不应执行');
+  const tr = events.find((e) => e.type === 'tool_result');
+  assert.match(tr.result.output, /策略拦截：禁止写文件/);
+});
+
+test('engine: modelOverride 覆盖 settings.model 传给 provider', async () => {
+  const session = makeSession('chat');
+  session.messages.push({ role: 'user', content: '你好', id: 'u1' });
+  const harness = harnesses.find((h) => h.id === 'chat');
+  let gotModel = null;
+  const spyProvider = {
+    async *stream(_messages, opts) {
+      gotModel = opts.model;
+      yield { type: 'text_delta', delta: 'ok' };
+    },
+  };
+  await collectEvents({
+    session,
+    harness,
+    character: null,
+    provider: spyProvider,
+    toolRegistry: createCodeTools(wsRoot),
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: { model: 'default-model' },
+    modelOverride: 'override-model',
+  });
+  assert.equal(gotModel, 'override-model', 'modelOverride 应优先于 settings.model');
+});

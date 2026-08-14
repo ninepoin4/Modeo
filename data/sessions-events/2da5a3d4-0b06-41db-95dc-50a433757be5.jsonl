@@ -1,0 +1,5 @@
+{"ts":"2026-08-14T01:23:39.272Z","type":"user_message","messageId":"2f29bd7b-0fc1-4251-8d42-c145418c3920","content":"你好"}
+{"ts":"2026-08-14T01:23:39.273Z","type":"text_delta","delta":"【mock-cu"}
+{"ts":"2026-08-14T01:23:39.273Z","type":"text_delta","delta":"stom-tes"}
+{"ts":"2026-08-14T01:23:39.274Z","type":"text_delta","delta":"t】你好"}
+{"ts":"2026-08-14T01:23:39.274Z","type":"done","messageId":"ea022b72-a234-49be-a654-f41fe7e7735b"}

@@ -15,6 +15,8 @@ import { createProvider } from './src/core/provider.js';
 import * as sessionStore from './src/core/session.js';
 import * as approvalsMgr from './src/core/approvals.js';
 import { runAgentTurn, assembleSystemPrompt } from './src/runtime/engine.js';
+import { createAuditHooks } from './src/core/audit.js';
+import { appendSessionEvent, deleteSessionEvents, findOrphanEvents } from './src/core/sessionEvents.js';
 import { compressSession } from './src/runtime/compress.js';
 import { createAllTools } from './src/tools/registry.js';
 import { loadPlugins } from './src/tools/pluginLoader.js';
@@ -39,6 +41,8 @@ const WORKSPACE_ROOT = process.env.MODEO_WORKSPACE_DIR
   : path.join(ROOT, 'workspaces', 'default');
 const USER_HARNESS_DIR = path.join(DATA_DIR, 'harness');
 const PORT = Number(process.env.MODEO_PORT || 8787);
+// 工具执行管道钩子（P0-2）：默认注册审计后置钩子，每次工具执行落 data/audit.log
+const toolPipeline = createAuditHooks(DATA_DIR);
 
 fs.mkdirSync(path.join(DATA_DIR, 'sessions'), { recursive: true });
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -217,6 +221,8 @@ async function handleMessages(req, res, id) {
   const body = await readJson(req, res);
   const content = String(body.content || '').trim();
   if (!content) return sendJson(res, 400, { error: '消息内容为空' });
+  // 消息级模型 override（pi 模型接力思想）：可选，仅本条消息生效
+  const modelOverride = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
 
   const harness = harnesses.get(session.modeId);
   if (!harness) return sendJson(res, 400, { error: '会话模式配置缺失' });
@@ -241,6 +247,8 @@ async function handleMessages(req, res, id) {
   session.messages.push({ role: 'user', content, id: randomUUID() });
   session.updatedAt = new Date().toISOString();
   sessionStore.saveSession(session);
+  // 事件日志：用户消息（崩溃排障轨迹）
+  appendSessionEvent(DATA_DIR, session.id, { type: 'user_message', messageId: session.messages[session.messages.length - 1].id, content: content.slice(0, 2000) });
 
   const wantsSSE = String(req.headers.accept || '').includes('text/event-stream');
   if (!wantsSSE) {
@@ -255,8 +263,13 @@ async function handleMessages(req, res, id) {
       approvals: approvalsMgr,
       workspaceRoot: WORKSPACE_ROOT,
       persist: sessionStore.saveSession,
-      emit: (e) => events.push(e),
+      emit: (e) => {
+        events.push(e);
+        appendSessionEvent(DATA_DIR, session.id, e);
+      },
       settings: loadSettings(),
+      toolPipeline,
+      modelOverride,
     });
     return sendJson(res, 200, { session, events });
   }
@@ -273,6 +286,8 @@ async function handleMessages(req, res, id) {
   const abortCtl = new AbortController();
   let turnDone = false;
   const emit = (e) => {
+    // 事件日志：落盘轨迹（tool_call / tool_result / approval / done / error 等）
+    appendSessionEvent(DATA_DIR, session.id, e);
     if (res.destroyed) return;
     try {
       res.write(`data: ${JSON.stringify(e)}\n\n`);
@@ -299,6 +314,8 @@ async function handleMessages(req, res, id) {
       emit,
       settings: loadSettings(),
       signal: abortCtl.signal,
+      toolPipeline,
+      modelOverride,
     });
   } finally {
     turnDone = true;
@@ -328,6 +345,7 @@ async function handleResume(req, res, id) {
   const abortCtl = new AbortController();
   let turnDone = false;
   const emit = (e) => {
+    appendSessionEvent(DATA_DIR, session.id, e);
     if (res.destroyed) return;
     try {
       res.write(`data: ${JSON.stringify(e)}\n\n`);
@@ -354,6 +372,7 @@ async function handleResume(req, res, id) {
       settings: loadSettings(),
       resume: true,
       signal: abortCtl.signal,
+      toolPipeline,
     });
   } finally {
     turnDone = true;
@@ -572,7 +591,8 @@ const server = http.createServer(async (req, res) => {
       return withSessionLock(id, async () => {
         try {
           sessionStore.deleteSession(id);
-          // 顺带清理该会话的快照与基线（目录不存在则跳过）
+          // 顺带清理该会话的快照、基线与事件日志（目录不存在则跳过）
+          deleteSessionEvents(DATA_DIR, id);
           for (const dir of [path.join(DATA_DIR, 'checkpoints', id), path.join(DATA_DIR, 'baselines', id)]) {
             fs.rmSync(dir, { recursive: true, force: true });
           }
@@ -1038,10 +1058,27 @@ const server = http.createServer(async (req, res) => {
       const id = p.slice('/api/approvals/'.length);
       const body = await readJson(req);
       try {
-        if (body.decision === 'approve') approvalsMgr.approve(id, body.sessionId);
-        else if (body.decision === 'deny') approvalsMgr.deny(id, body.sessionId);
-        else return sendJson(res, 400, { error: 'decision 必须是 approve 或 deny' });
-        return sendJson(res, 200, { approval: approvalsMgr.getApproval(id) });
+        if (body.decision === 'approve') {
+          const a = approvalsMgr.approve(id, body.sessionId, body.args);
+          // 审批弹窗可编辑参数：同步更新会话挂起状态，resume 执行时用编辑后的参数（pi Steering 思想）
+          if (body.sessionId && body.args && typeof body.args === 'object' && !Array.isArray(body.args)) {
+            try {
+              const s = sessionStore.getSession(body.sessionId);
+              if (s?.pendingApproval?.toolCall) {
+                s.pendingApproval.toolCall = { ...s.pendingApproval.toolCall, args: body.args };
+                sessionStore.saveSession(s);
+              }
+            } catch {
+              // 会话不存在等异常忽略：审批记录已含新参数，resume 会走 404 分支
+            }
+          }
+          return sendJson(res, 200, { approval: a });
+        }
+        if (body.decision === 'deny') {
+          approvalsMgr.deny(id, body.sessionId);
+          return sendJson(res, 200, { approval: approvalsMgr.getApproval(id) });
+        }
+        return sendJson(res, 400, { error: 'decision 必须是 approve 或 deny' });
       } catch (err) {
         return sendJson(res, 404, { error: err.message || '审批不存在' });
       }
@@ -1104,4 +1141,13 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Modeo 已启动: http://127.0.0.1:${PORT}`);
   console.log(`沙箱工作区: ${WORKSPACE_ROOT}`);
+  // 启动扫描：事件日志存在但会话文件缺失（会话文件损坏/异常删除）→ 提示可排障
+  try {
+    const orphans = findOrphanEvents(DATA_DIR, sessionStore.listSessions().map((s) => s.id));
+    if (orphans.length) {
+      console.warn(`检测到 ${orphans.length} 个孤儿会话事件日志（会话文件缺失）：${orphans.slice(0, 5).join(', ')}${orphans.length > 5 ? ' ...' : ''}`);
+    }
+  } catch {
+    // 扫描失败不影响启动
+  }
 });

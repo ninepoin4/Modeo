@@ -217,7 +217,7 @@ export default function App() {
           )
         );
       } else if (evt.type === 'approval_required') {
-        setPendingApproval({ approvalId: evt.approvalId, summary: evt.summary });
+        setPendingApproval({ approvalId: evt.approvalId, summary: evt.summary, toolCall: evt.toolCall });
         setStreaming(false);
       } else if (evt.type === 'done') {
         setStreaming(false);
@@ -242,7 +242,7 @@ export default function App() {
   );
 
   const sendMessage = useCallback(
-    async (content) => {
+    async (content, modelOverride) => {
       // ref 镜像防抖：React 批处理窗口内连按 Enter 也只会发一次（state 闭包可能读到旧值）
       if (!session || streaming || sendingRef.current) return;
       sendingRef.current = true;
@@ -251,7 +251,13 @@ export default function App() {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        await streamEvents(`/api/sessions/${session.id}/messages`, { content }, handleStreamEvent, { signal: controller.signal });
+        // modelOverride：消息级模型切换（pi 模型接力思想），仅本条消息生效
+        await streamEvents(
+          `/api/sessions/${session.id}/messages`,
+          { content, ...(modelOverride ? { model: modelOverride } : {}) },
+          handleStreamEvent,
+          { signal: controller.signal }
+        );
       } catch (e) {
         if (e.name !== 'AbortError') {
           setStreaming(false);
@@ -306,13 +312,13 @@ export default function App() {
   }, [session, toast, streaming, refreshSessions]);
 
   const decideApproval = useCallback(
-    async (decision) => {
+    async (decision, argsOverride) => {
       const a = pendingApproval;
       if (!a) return;
       setPendingApproval(null);
       // 审批决策本身失败：恢复 pendingApproval，允许用户重试（不丢审批上下文）
       try {
-        await api.decideApproval(a.approvalId, decision, session.id);
+        await api.decideApproval(a.approvalId, decision, session.id, argsOverride);
       } catch (e) {
         setPendingApproval(a);
         setMessages((prev) => [...prev, { role: 'assistant', content: `审批操作失败：${e.message}`, id: uid() }]);
@@ -756,6 +762,7 @@ export default function App() {
             messages={messages}
             streaming={streaming}
             characterName={activeCharacter}
+            defaultModel={settings?.model}
             onSend={sendMessage}
             onStop={stopStreaming}
             onTransparency={() => setDialog((d) => ({ ...d, transparency: true }))}

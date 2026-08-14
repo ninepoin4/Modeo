@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, Send, Copy, Check, Square, ArrowDown, Paperclip, Loader2 } from 'lucide-react';
+import { Eye, Send, Copy, Check, Square, ArrowDown, Paperclip, Loader2, X } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Tooltip } from './ui/tooltip';
@@ -116,13 +116,17 @@ function Bubble({ m, streaming, delay }) {
   );
 }
 
-export default function ChatArea({ session, messages, streaming, characterName, onSend, onStop, onTransparency, onSlashCommand, onUnknownSlash, onPermissionChange }) {
+export default function ChatArea({ session, messages, streaming, characterName, defaultModel, onSend, onStop, onTransparency, onSlashCommand, onUnknownSlash, onPermissionChange }) {
   const [text, setText] = useState('');
   const [showBottom, setShowBottom] = useState(false);
   const [suggestDismissed, setSuggestDismissed] = useState(false);
   const [suggestIndex, setSuggestIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  // 消息级模型 override（pi 模型接力思想）：仅本条消息生效，空 = 用默认模型
+  const [modelOverride, setModelOverride] = useState('');
+  const [editingModel, setEditingModel] = useState(false);
+  const [modelDraft, setModelDraft] = useState('');
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -210,7 +214,12 @@ export default function ChatArea({ session, messages, streaming, characterName, 
       return;
     }
     setText('');
-    onSend(v);
+    onSend(v, modelOverride || undefined);
+  };
+
+  const confirmModel = () => {
+    setModelOverride(modelDraft.trim());
+    setEditingModel(false);
   };
 
   return (
@@ -259,6 +268,59 @@ export default function ChatArea({ session, messages, streaming, characterName, 
               </button>
             </Tooltip>
           )}
+          <Tooltip
+            content={
+              modelOverride
+                ? `之后的消息使用模型 ${modelOverride}（点击恢复默认 ${defaultModel || '未配置'}）`
+                : `当前模型 ${defaultModel || '未配置'}（点击指定模型，pi 接力式换模型）`
+            }
+          >
+            <div className="flex items-center gap-1 rounded-full border border-line bg-card/60 px-2.5 py-1 text-xs text-muted transition-colors hover:border-ink/40">
+              <span>模型</span>
+              {editingModel ? (
+                <>
+                  <input
+                    data-testid="model-input"
+                    autoFocus
+                    value={modelDraft}
+                    onChange={(e) => setModelDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        confirmModel();
+                      } else if (e.key === 'Escape') {
+                        setEditingModel(false);
+                      }
+                    }}
+                    placeholder={defaultModel || '模型名'}
+                    className="w-28 bg-transparent font-mono text-ink outline-none placeholder:text-muted"
+                  />
+                  <button data-testid="model-confirm" onClick={confirmModel} className="text-muted hover:text-ink" title="确认">
+                    <Check className="h-3 w-3" />
+                  </button>
+                  <button onClick={() => setEditingModel(false)} className="text-muted hover:text-ink" title="取消">
+                    <X className="h-3 w-3" />
+                  </button>
+                </>
+              ) : (
+                <button
+                  data-testid="model-chip"
+                  disabled={streaming}
+                  onClick={() => {
+                    setEditingModel(true);
+                    setModelDraft(modelOverride);
+                  }}
+                  title={streaming ? '消息生成中，暂不可切换模型' : undefined}
+                  className={`font-mono transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    modelOverride ? 'text-ink' : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  {modelOverride || defaultModel || '未配置'}
+                  {modelOverride && <span className="ml-0.5 text-amber-600">*</span>}
+                </button>
+              )}
+            </div>
+          </Tooltip>
           <Tooltip content="提示词透明面板">
             <Button size="icon" variant="ghost" onClick={onTransparency}>
               <Eye className="h-4 w-4" />
