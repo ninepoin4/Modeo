@@ -56,8 +56,21 @@ function waitForServer(url, timeoutMs = 20000) {
     const started = Date.now();
     const tick = () => {
       const req = http.get(url, (res) => {
-        res.resume();
-        resolve();
+        let body = '';
+        res.on('data', (d) => (body += d));
+        res.on('end', () => {
+          // 身份校验（2026-08-15 审查修复）：必须是 Modeo 的 /api/health 响应，
+          // 防止端口被恶意进程抢占后加载钓鱼页面骗取 API key
+          try {
+            const j = JSON.parse(body);
+            if (j && j.ok === true && typeof j.modes === 'number') return resolve();
+          } catch {
+            /* 非 JSON 响应 */
+          }
+          if (Date.now() - started > timeoutMs) reject(new Error('端口被非 Modeo 服务占用'));
+          else setTimeout(tick, 300);
+        });
+        res.on('error', () => {});
       });
       req.on('error', () => {
         if (Date.now() - started > timeoutMs) reject(new Error('等待 Modeo 服务超时'));

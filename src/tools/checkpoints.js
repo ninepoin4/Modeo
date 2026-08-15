@@ -131,10 +131,15 @@ export function listCheckpoints(sessionId) {
 /** 判断工作区是否允许被快照恢复清空/还原（防误删任意目录） */
 function isAllowedWorkspace(workspaceRoot) {
   const resolved = path.resolve(String(workspaceRoot || ''));
+  // 拒绝盘符根与用户主目录本身（2026-08-15 修复：MODEO_WORKSPACE_DIR 精确匹配分支此前可指向 C:\ 等，
+  // 恢复快照的 fs.rmSync(recursive) 会清空整个盘——必须拒绝根目录；主目录本身同理高危）
+  if (resolved === path.parse(resolved).root) return false;
+  const home = process.env.USERPROFILE || process.env.HOME;
+  if (home && resolved === path.resolve(home)) return false;
   // 标准情况：必须是 workspaces 根目录下的子目录（根自身不允许——避免清空全部子工作区）
   const wsRoot = path.resolve(getWorkspacesRoot());
   if (resolved.startsWith(wsRoot + path.sep)) return true;
-  // 自定义工作区（MODEO_WORKSPACE_DIR）：允许精确等于它
+  // 自定义工作区（MODEO_WORKSPACE_DIR）：允许精确等于它（已排除根目录与用户主目录）
   if (process.env.MODEO_WORKSPACE_DIR && resolved === path.resolve(process.env.MODEO_WORKSPACE_DIR)) return true;
   return false;
 }

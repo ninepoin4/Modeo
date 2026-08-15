@@ -177,6 +177,9 @@ export function parseYaml(text) {
       idx++;
       if (rest === '') {
         arr.push(parseBlock(indent + 2, depth + 1));
+      } else if (rest === '|' || rest === '>') {
+        // 数组项块标量（兼容外部 YAML 导入，2026-08-15 修复）
+        arr.push(parseBlockScalar(indent, rest === '>'));
       } else if (rest.startsWith('-')) {
         const nested = [parseScalar(rest.slice(1).trim())];
         while (idx < lines.length && lines[idx].indent > indent && lines[idx].text.startsWith('-')) {
@@ -285,12 +288,9 @@ function linesOf(v, indent) {
           for (const k of keys) lines.push(...linesOfKey(k, item[k], indent + 2));
         }
       } else {
-        if (typeof item === 'string' && item.includes('\n')) {
-          lines.push(`${pad}- |`);
-          lines.push(...item.split('\n').map((l) => (l ? ' '.repeat(indent + 4) + l : '')));
-        } else {
-          lines.push(`${pad}- ${renderScalar(item)}`);
-        }
+        // 数组项多行字符串：内联 JSON 引号（2026-08-15 修复——原 `- |` 块标量
+        // parseSequence 不支持，导致 YAML 往返损坏）。renderScalar 对含 \n 的串走 JSON.stringify。
+        lines.push(`${pad}- ${renderScalar(item)}`);
       }
     }
     return lines;

@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 
+// 本测试用 127.0.0.1 起本地服务测 fetchPackJson/fetchMarketIndex；
+// pack.js 的 SSRF 防护（isBlockedHost）拒绝回环地址，需显式开逃生口（2026-08-15 修复：
+// 此前纯净环境 node --test 3 个用例失败，只有带 MODEO_ALLOW_LOOPBACK=1 才过）。
+process.env.MODEO_ALLOW_LOOPBACK = '1';
+
 import {
   buildPack,
   parsePack,

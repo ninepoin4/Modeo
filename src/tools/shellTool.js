@@ -14,6 +14,8 @@ const MAX_OUTPUT = 64 * 1024;
 const DANGEROUS_PATTERNS = [
   // rm 递归删除（-r / -rf / -fr 等组合）；rm -f 单文件不算
   /\brm\s+-[a-z]*r[a-z]*\b/i,
+  // rm 长选项 + 递归组合（2026-08-15 修复：rm --force -r 此前绕过）
+  /\brm\s+(?:--[a-z-]+\s+)*-r[a-z]*\b/i,
   // rm 长选项递归（--force 语义等同 -f 单文件，不算危险）
   /\brm\s+--(?:recursive|no-preserve-root)\b/i,
   // rm 通配符删除
@@ -35,6 +37,34 @@ const DANGEROUS_PATTERNS = [
   /\bdiskpart\b/i,
   /\bdism\b/i,
   /\bsfc\b/i,
+  // 关机/重启家族补充（2026-08-15 修复：Stop-Computer/poweroff/halt 此前绕过）
+  /\b(?:stop-computer|restart-computer|poweroff|halt)\b/i,
+  // ==== 审批绕过补充（2026-08-15 审查修复）====
+  // erase（del 别名）递归删除
+  /\berase\s+(?:\/[a-z]{1,2}\s+)*\/[a-z]*s/i,
+  /\berase\s+(?:\/[a-z]{1,2}\s+)*[^\s]*\*/i,
+  // PowerShell 编码命令执行（-enc / -EncodedCommand；nc 后接 command 为长选项，否则词边界收尾）
+  /\bpowershell(?:\.exe)?\b[^\n]*-e(?:nc(?:odedcommand)?)\b/i,
+  // certutil 解码/下载执行
+  /\bcertutil\b[^\n]*(?:-decode|-decodehex|-urlcache)/i,
+  // 注册表持久化
+  /\breg\s+add\b/i,
+  // bitsadmin 下载执行
+  /\bbitsadmin\b[^\n]*(?:transfer|create)/i,
+  // mshta / wmic / rundll32 间接执行
+  /\bmshta(?:\.exe)?\b/i,
+  /\bwmic(?:\.exe)?\b[^\n]*process\s+call\s+create/i,
+  /\brundll32(?:\.exe)?\b/i,
+  // PowerShell 表达式执行
+  /\b(?:iex|Invoke-Expression)\b/i,
+];
+
+/**
+ * 跨管道"下载即执行"模式：curl/wget/iwr ... | sh/bash/powershell/iex。
+ * 必须在整条命令级检测——segmentCommand 按 | 拆分会把管道关系拆掉（各段单独看都不危险）。
+ */
+const PIPE_EXEC_PATTERNS = [
+  /\b(?:curl|wget|Invoke-WebRequest|iwr)\b[^\n]*\|\s*(?:sh|bash|powershell|pwsh|iex|Invoke-Expression)\b/i,
 ];
 
 /**
@@ -57,8 +87,13 @@ const SENSITIVE_PATH_PATTERNS = [
 ];
 
 function isSensitiveAccess(command) {
-  const segments = segmentCommand(String(command || ''));
+  const segments = segmentCommand(stripQuotes(command));
   return segments.some((seg) => SENSITIVE_PATH_PATTERNS.some((re) => re.test(seg)));
+}
+
+/** 剥离引号后检测（2026-08-15 修复：cat ".env" 等引号包裹敏感路径此前漏检） */
+function stripQuotes(s) {
+  return String(s || '').replace(/["']/g, '');
 }
 
 /** 按 && / || / ; / | 拆分命令段（忽略引号内内容） */
@@ -82,7 +117,10 @@ function segmentCommand(command) {
 }
 
 function isDangerous(command) {
-  const segments = segmentCommand(String(command || ''));
+  const cmd = stripQuotes(command);
+  // 跨管道"下载即执行"必须在整条命令级检测（分段会拆掉管道关系）
+  if (PIPE_EXEC_PATTERNS.some((re) => re.test(cmd))) return true;
+  const segments = segmentCommand(cmd);
   return segments.some((seg) => DANGEROUS_PATTERNS.some((re) => re.test(seg)));
 }
 

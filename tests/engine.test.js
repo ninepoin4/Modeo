@@ -66,6 +66,7 @@ test('engine: code 模式注入工作区 AGENTS.md 约定', () => {
   const prompt = assembleSystemPrompt(code, null, wsRoot);
   assert.match(prompt, /AGENTS.md/);
   assert.match(prompt, /TypeScript/);
+  assert.match(prompt, /不可信内容/, 'AGENTS.md 应标注为不可信内容（防提示词注入）');
   const chat = harnesses.find((h) => h.id === 'chat');
   assert.equal(assembleSystemPrompt(chat, null, wsRoot), null);
   fs.unlinkSync(path.join(wsRoot, 'AGENTS.md'));
@@ -338,4 +339,61 @@ test('engine: modelOverride 覆盖 settings.model 传给 provider', async () => 
     modelOverride: 'override-model',
   });
   assert.equal(gotModel, 'override-model', 'modelOverride 应优先于 settings.model');
+});
+
+test('engine: 工具抛异常被隔离，补错误消息不锁死会话', async () => {
+  const session = makeSession('code');
+  session.messages.push({ role: 'user', content: 'write file please', id: 'u1' });
+  const harness = harnesses.find((h) => h.id === 'code');
+  const boom = {
+    name: 'boom_tool',
+    execute: async () => {
+      throw new Error('插件爆炸');
+    },
+  };
+  // Mock provider 会为 "write file please" 返回 write_file 工具调用；让任意工具名都命中抛错工具
+  const fakeRegistry = { get: () => boom };
+  const events = await collectEvents({
+    session,
+    harness: { ...harness, tools: ['boom_tool'] },
+    character: null,
+    provider: new MockProvider(),
+    toolRegistry: fakeRegistry,
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: {},
+    toolPipeline: { pre: [], post: [] },
+  });
+  const tr = events.find((e) => e.type === 'tool_result');
+  assert.ok(tr, '应有 tool_result 事件');
+  assert.match(tr.result.output, /工具执行异常: 插件爆炸/);
+  assert.ok(session.messages.some((m) => m.role === 'tool' && m.toolCallId === tr.toolCall.id), 'tool 消息配对完整');
+});
+
+test('engine: 超过 compactAfter 自动压缩历史', async () => {
+  const session = makeSession('chat');
+  for (let i = 0; i < 40; i++) {
+    session.messages.push({ role: 'user', content: '第' + i + '条', id: 'u' + i });
+    session.messages.push({ role: 'assistant', content: '回复' + i, id: 'a' + i });
+  }
+  session.messages.push({ role: 'user', content: '总结一下', id: 'u-final' });
+  const harness = harnesses.find((h) => h.id === 'chat');
+  const events = await collectEvents({
+    session,
+    harness: { ...harness, context: { ...harness.context, compactAfter: 40 } },
+    character: null,
+    provider: new MockProvider(),
+    toolRegistry: createCodeTools(wsRoot),
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: {},
+  });
+  const msgs = store.getSession(session.id).messages;
+  assert.ok(msgs.some((m) => m.role === 'assistant' && /【历史摘要】/.test(m.content)), '应生成摘要');
+  assert.ok(msgs.some((m) => m.role === 'notice' && /已压缩/.test(m.content)), '应有压缩提示');
+  const sig = msgs.filter((m) => m.role !== 'notice');
+  assert.ok(sig.length <= 12, '压缩后消息应大幅减少，实际 ' + sig.length);
+  assert.ok(events.some((e) => e.type === 'done'));
 });

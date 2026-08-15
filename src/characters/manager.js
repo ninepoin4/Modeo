@@ -82,7 +82,17 @@ export function saveCharacter(yamlText) {
   const normalized = normalizeCharacter(obj);
   const file = charFile(normalized.id);
   fs.writeFileSync(file, stringifyYaml(normalized), 'utf8');
-  return loadCharacter(normalized.id);
+  try {
+    return loadCharacter(normalized.id);
+  } catch (err) {
+    // 保存后回读失败（理论不可达，防御）：回滚已写文件，避免损坏角色残留磁盘且列表静默跳过
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
 }
 
 export function updateCharacter(id, yamlText) {

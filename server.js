@@ -17,6 +17,7 @@ import * as approvalsMgr from './src/core/approvals.js';
 import { runAgentTurn, assembleSystemPrompt } from './src/runtime/engine.js';
 import { createAuditHooks } from './src/core/audit.js';
 import { appendSessionEvent, deleteSessionEvents, findOrphanEvents } from './src/core/sessionEvents.js';
+import { atomicWriteFileSync } from './src/core/atomic.js';
 import { compressSession } from './src/runtime/compress.js';
 import { createAllTools } from './src/tools/registry.js';
 import { loadPlugins } from './src/tools/pluginLoader.js';
@@ -103,7 +104,7 @@ function loadSettings() {
 
 function saveSettings(s) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2), 'utf8');
+  atomicWriteFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2), 'utf8');
 }
 
 /**
@@ -246,6 +247,11 @@ async function handleMessages(req, res, id) {
 
   session.messages.push({ role: 'user', content, id: randomUUID() });
   session.updatedAt = new Date().toISOString();
+  // 自动会话标题（2026-08-15 新增）：首条消息生成默认标题，避免永远叫"新会话"
+  if (!session.title || session.title === '新会话') {
+    const flat = content.replace(/\s+/g, ' ').trim();
+    session.title = flat.length > 24 ? `${flat.slice(0, 24)}…` : flat;
+  }
   sessionStore.saveSession(session);
   // 事件日志：用户消息（崩溃排障轨迹）
   appendSessionEvent(DATA_DIR, session.id, { type: 'user_message', messageId: session.messages[session.messages.length - 1].id, content: content.slice(0, 2000) });
@@ -805,6 +811,19 @@ const server = http.createServer(async (req, res) => {
         })
       );
     }
+    if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/answer-question')) {
+      const id = p.slice('/api/sessions/'.length, -'/answer-question'.length);
+      return withSessionLock(id, async () => {
+        const session = getSessionOr404(res, id);
+        if (!session) return;
+        const body = await readJson(req, res);
+        if (!session.pendingQuestion) return sendJson(res, 400, { error: '没有待回答的问题' });
+        session.pendingQuestion.answer = String(body.answer || '');
+        if (body.skipped === true) session.pendingQuestion.skipped = true;
+        sessionStore.saveSession(session);
+        return sendJson(res, 200, { session });
+      });
+    }
     if (method === 'POST' && p.startsWith('/api/sessions/') && p.endsWith('/resume')) {
       const id = p.slice('/api/sessions/'.length, -'/resume'.length);
       return withSessionLock(id, () =>
@@ -1075,31 +1094,36 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST' && p.startsWith('/api/approvals/')) {
       const id = p.slice('/api/approvals/'.length);
       const body = await readJson(req);
-      try {
-        if (body.decision === 'approve') {
-          const a = approvalsMgr.approve(id, body.sessionId, body.args);
-          // 审批弹窗可编辑参数：同步更新会话挂起状态，resume 执行时用编辑后的参数（pi Steering 思想）
-          if (body.sessionId && body.args && typeof body.args === 'object' && !Array.isArray(body.args)) {
-            try {
-              const s = sessionStore.getSession(body.sessionId);
-              if (s?.pendingApproval?.toolCall) {
-                s.pendingApproval.toolCall = { ...s.pendingApproval.toolCall, args: body.args };
-                sessionStore.saveSession(s);
+      // 审批决策会改写会话（参数编辑）+ 触发 resume 读-改-写，须与会话消息端点同锁防竞态（2026-08-15 修复）
+      const approveSessionId = String(body.sessionId || '');
+      const run = async () => {
+        try {
+          if (body.decision === 'approve') {
+            const a = approvalsMgr.approve(id, approveSessionId, body.args);
+            // 审批弹窗可编辑参数：同步更新会话挂起状态，resume 执行时用编辑后的参数（pi Steering 思想）
+            if (approveSessionId && body.args && typeof body.args === 'object' && !Array.isArray(body.args)) {
+              try {
+                const s = sessionStore.getSession(approveSessionId);
+                if (s?.pendingApproval?.toolCall) {
+                  s.pendingApproval.toolCall = { ...s.pendingApproval.toolCall, args: body.args };
+                  sessionStore.saveSession(s);
+                }
+              } catch {
+                // 会话不存在等异常忽略：审批记录已含新参数，resume 会走 404 分支
               }
-            } catch {
-              // 会话不存在等异常忽略：审批记录已含新参数，resume 会走 404 分支
             }
+            return sendJson(res, 200, { approval: a });
           }
-          return sendJson(res, 200, { approval: a });
+          if (body.decision === 'deny') {
+            approvalsMgr.deny(id, approveSessionId);
+            return sendJson(res, 200, { approval: approvalsMgr.getApproval(id) });
+          }
+          return sendJson(res, 400, { error: 'decision 必须是 approve 或 deny' });
+        } catch (err) {
+          return sendJson(res, 404, { error: err.message || '审批不存在' });
         }
-        if (body.decision === 'deny') {
-          approvalsMgr.deny(id, body.sessionId);
-          return sendJson(res, 200, { approval: approvalsMgr.getApproval(id) });
-        }
-        return sendJson(res, 400, { error: 'decision 必须是 approve 或 deny' });
-      } catch (err) {
-        return sendJson(res, 404, { error: err.message || '审批不存在' });
-      }
+      };
+      return approveSessionId ? withSessionLock(approveSessionId, run) : run();
     }
     if (method === 'GET' && p === '/api/settings') {
       return sendJson(res, 200, { settings: publicSettings(loadSettings()) });

@@ -16,6 +16,7 @@ import RoleplaySidebar from './components/RoleplaySidebar';
 import SettingsDialog from './components/dialogs/SettingsDialog';
 import TransparencyDialog from './components/dialogs/TransparencyDialog';
 import ApprovalDialog from './components/dialogs/ApprovalDialog';
+import QuestionDialog from './components/dialogs/QuestionDialog';
 import CharacterEditorDialog from './components/dialogs/CharacterEditorDialog';
 import WorldStateDialog from './components/dialogs/WorldStateDialog';
 import CommandPalette from './components/CommandPalette';
@@ -67,6 +68,7 @@ export default function App() {
   const [selectedCharacterId, setSelectedCharacterId] = useState(null);
   const [streaming, setStreaming] = useState(false);
   const [pendingApproval, setPendingApproval] = useState(null);
+  const [pendingQuestion, setPendingQuestion] = useState(null);
   const [ready, setReady] = useState(false);
   const [themes, setThemes] = useState([]);
   const [themeId, setThemeId] = useState(() => {
@@ -166,6 +168,7 @@ export default function App() {
     abortRef.current = null;
     setStreaming(false);
     setPendingApproval(null);
+    setPendingQuestion(null);
     activeSessionIdRef.current = id;
     const r = await api.session(id);
     if (activeSessionIdRef.current !== id) return; // 期间又切换了会话，丢弃过期回包
@@ -218,6 +221,9 @@ export default function App() {
         );
       } else if (evt.type === 'approval_required') {
         setPendingApproval({ approvalId: evt.approvalId, summary: evt.summary, toolCall: evt.toolCall });
+        setStreaming(false);
+      } else if (evt.type === 'question_required') {
+        setPendingQuestion({ question: evt.question, options: evt.options || [] });
         setStreaming(false);
       } else if (evt.type === 'done') {
         setStreaming(false);
@@ -316,6 +322,7 @@ export default function App() {
       const a = pendingApproval;
       if (!a) return;
       setPendingApproval(null);
+    setPendingQuestion(null);
       // 审批决策本身失败：恢复 pendingApproval，允许用户重试（不丢审批上下文）
       try {
         await api.decideApproval(a.approvalId, decision, session.id, argsOverride);
@@ -361,6 +368,37 @@ export default function App() {
     [pendingApproval, session?.id, handleStreamEvent]
   );
 
+  const answerQuestion = useCallback(
+    async (answer, skipped = false) => {
+      const q = pendingQuestion;
+      if (!q) return;
+      setPendingQuestion(null);
+      try {
+        if (skipped) await api.skipQuestion(session.id);
+        else await api.answerQuestion(session.id, answer);
+      } catch (e) {
+        setPendingQuestion(q);
+        setMessages((prev) => [...prev, { role: 'assistant', content: `回答提交失败：${e.message}`, id: uid() }]);
+        return;
+      }
+      setStreaming(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        await streamEvents(`/api/sessions/${session.id}/resume`, {}, handleStreamEvent, { signal: controller.signal });
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          setStreaming(false);
+          setMessages((prev) => [...prev, { role: 'assistant', content: `恢复失败：${e.message}（可重新发送消息继续）`, id: uid() }]);
+        }
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
+      }
+      setStreaming(false);
+    },
+    [pendingQuestion, session?.id, handleStreamEvent]
+  );
+
   const switchMode = useCallback(
     async (modeId) => {
       if (modeId === selectedMode) return;
@@ -369,6 +407,7 @@ export default function App() {
       abortRef.current = null;
       setStreaming(false);
       setPendingApproval(null);
+    setPendingQuestion(null);
       setToolLog([]);
       if (session) {
         const r = await api.switchMode(session.id, modeId);
@@ -409,6 +448,7 @@ export default function App() {
               setMessages([]);
               setToolLog([]);
               setPendingApproval(null);
+    setPendingQuestion(null);
               setSelectedMode('chat');
               setSelectedCharacterId(null);
             }
@@ -905,6 +945,7 @@ export default function App() {
           />
         )}
         {pendingApproval && <ApprovalDialog approval={pendingApproval} onDecide={decideApproval} />}
+        {pendingQuestion && <QuestionDialog question={pendingQuestion} onAnswer={answerQuestion} />}
         {confirm && (
           <ConfirmDialog
             open

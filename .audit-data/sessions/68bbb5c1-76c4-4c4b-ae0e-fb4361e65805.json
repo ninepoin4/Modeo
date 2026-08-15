@@ -1,0 +1,37 @@
+{
+  "id": "68bbb5c1-76c4-4c4b-ae0e-fb4361e65805",
+  "modeId": "chat",
+  "characterId": null,
+  "characters": [],
+  "title": "导入会话",
+  "createdAt": "2026-08-15T02:56:51.645Z",
+  "updatedAt": "2026-08-15T02:56:51.646Z",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hi"
+    },
+    {
+      "role": "tool",
+      "content": "x",
+      "toolCallId": "t1"
+    },
+    {
+      "role": "assistant",
+      "content": "a",
+      "toolCalls": [
+        {
+          "args": {},
+          "name": "x",
+          "id": "t1"
+        }
+      ]
+    }
+  ],
+  "modeLog": [],
+  "worldState": {},
+  "goal": null,
+  "lastSummary": null,
+  "pendingApproval": null,
+  "permissionMode": "standard"
+}

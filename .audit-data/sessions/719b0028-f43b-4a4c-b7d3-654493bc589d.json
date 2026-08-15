@@ -1,0 +1,85 @@
+{
+  "id": "719b0028-f43b-4a4c-b7d3-654493bc589d",
+  "modeId": "code",
+  "characterId": null,
+  "characters": [],
+  "title": "新会话",
+  "createdAt": "2026-08-15T02:56:33.099Z",
+  "updatedAt": "2026-08-15T02:56:41.938Z",
+  "messages": [
+    {
+      "role": "user",
+      "content": "list files in workspace",
+      "id": "502b84e1-568c-4e83-aaa5-62576885e022"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "id": "3b282e4e-e301-4b58-82c7-a6dde5765bd7",
+      "toolCalls": [
+        {
+          "id": "mock-1",
+          "name": "list_dir",
+          "args": {
+            "path": "."
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "[file] .gitkeep",
+      "id": "d6285ffb-3ed1-429e-b7cf-91dacafcf94a",
+      "toolCallId": "mock-1",
+      "name": "list_dir"
+    },
+    {
+      "role": "assistant",
+      "content": "【mock-code】工具执行完毕，结果摘要：[file] .gitkeep",
+      "id": "863f4db1-a598-4af7-9b8c-939e4bf5f087"
+    },
+    {
+      "role": "notice",
+      "content": "已切换到无审批模式：agent 可执行任意命令、访问任意文件（激进，风险自负）。",
+      "id": "f4fd32d6-380a-4161-b50d-383ac14e89ca"
+    },
+    {
+      "role": "user",
+      "content": "spawn a subagent to explore",
+      "id": "c85bb430-77d0-4820-9912-16c6f6339e4a"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "id": "af0ba878-7f13-42c3-9cb3-933a2ebae566",
+      "toolCalls": [
+        {
+          "id": "mock-sa-1",
+          "name": "spawn_agent",
+          "args": {
+            "description": "探索工作区",
+            "prompt": "用 list_dir 和 read_file 查看工作区根目录结构，返回：顶层目录清单、每个目录的用途推测、关键入口文件。"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "【mock-code】工具执行完毕，结果摘要：[file] .gitkeep",
+      "id": "b5e4da87-976e-4ed2-8e91-64dc98e91a6d",
+      "toolCallId": "mock-sa-1",
+      "name": "spawn_agent"
+    },
+    {
+      "role": "assistant",
+      "content": "【mock-code】工具执行完毕，结果摘要：【mock-code】工具执行完毕，结果摘要：[file] .gitkeep",
+      "id": "aab2b555-20fd-4314-8e3e-82df10a77a0f"
+    }
+  ],
+  "modeLog": [],
+  "pendingApproval": null,
+  "worldState": {},
+  "goal": null,
+  "lastSummary": null,
+  "permissionMode": "aggressive"
+}

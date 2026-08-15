@@ -16,7 +16,9 @@ export function isRiskyTestScript(script) {
   if (isDangerous(script)) return true;
   return /(?:\bnode\s+(?!-)[\w./\\-]+\.js\b|\b(?:python|python3|bash|sh|powershell|pwsh|cmd)\s+[\w./\\-]+\.(?:py|ps1|sh|cmd|bat|exe)\b|powershell\s+-(?:enc|encodedcommand)\b|base64\s+-d\b|curl\s+[^\s]+\s*\|\s*(?:sh|bash)\b)/i.test(
     script
-  );
+  ) ||
+    // 2026-08-15 修复：内联代码执行与间接脚本入口（node -e、python -c、npm run、cmd /c、sh -c）
+    /(?:\bnode\s+-[ep]\b|\b(?:python|python3)\s+-c\b|\bnpm\s+run\b|\bcmd(?:\s*\/[a-z]+\s*)*\s*\/c\b|\b(?:sh|bash)\s+-c\b)/i.test(script);
 }
 
 /**

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { atomicWriteFileSync } from './atomic.js';
 
 const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 const DATA_DIR = process.env.MODEO_DATA_DIR ? path.resolve(process.env.MODEO_DATA_DIR) : path.join(ROOT, 'data');
@@ -268,7 +269,7 @@ export function saveTheme(raw) {
     throw new Error(`内置主题 ${theme.id} 不可覆盖，请换一个 id`);
   }
   fs.mkdirSync(THEMES_DIR, { recursive: true });
-  fs.writeFileSync(themeFile(theme.id), JSON.stringify(theme, null, 2), 'utf8');
+  atomicWriteFileSync(themeFile(theme.id), JSON.stringify(theme, null, 2), 'utf8');
   return theme;
 }
 

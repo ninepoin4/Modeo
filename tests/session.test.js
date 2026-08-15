@@ -69,7 +69,8 @@ test('session: 导出/导入往返', () => {
   const imported = store.importSession(exported);
   assert.notEqual(imported.id, s.id);
   assert.equal(imported.modeId, 'code');
-  assert.equal(imported.messages.length, exported.messages.length);
+  assert.equal(imported.messages.length, exported.messages.length - 1); // 切换提示（notice）不随导入保留
+  assert.ok(!imported.messages.some((m) => m.role === 'notice'), 'notice 消息不应随导入保留');
   assert.equal(imported.characterId, 'wanxia');
   const reloaded = store.getSession(imported.id);
   assert.equal(reloaded.title, imported.title);

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { atomicWriteFileSync } from './atomic.js';
 
 const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 const DATA_DIR = process.env.MODEO_DATA_DIR ? path.resolve(process.env.MODEO_DATA_DIR) : path.join(ROOT, 'data');
@@ -20,7 +21,7 @@ function loadAll() {
 
 function persistAll() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(Object.fromEntries(pending), null, 2), 'utf8');
+  atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(pending), null, 2), 'utf8');
 }
 
 const pending = loadAll();

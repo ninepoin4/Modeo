@@ -22,6 +22,7 @@ export const SSE_EVENTS = {
   TOOL_CALL: 'tool_call',
   TOOL_RESULT: 'tool_result',
   APPROVAL_REQUIRED: 'approval_required',
+  QUESTION_REQUIRED: 'question_required',
   DONE: 'done',
   ERROR: 'error',
   MODE_CHANGED: 'mode_changed',

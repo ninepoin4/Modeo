@@ -12,6 +12,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { msg, SSE_EVENTS, cleanForProvider } from '../core/types.js';
+import { withToolTimeout } from '../core/exec.js';
 
 /** 子代理工具定义转 OpenAI function 格式 */
 function openAiToolDefs(tools) {
@@ -160,7 +161,14 @@ export function createAgentTools() {
                 needStop = true;
                 break;
               }
-              const result = await tool.execute(tc.args, childCtx);
+              // 工具异常隔离（2026-08-15 修复：与主循环一致，插件工具抛错不中断子代理循环）
+              // + 每工具超时统一裁决
+              let result;
+              try {
+                result = await withToolTimeout(tc.name, tool.execute(tc.args, childCtx), tool.timeoutMs);
+              } catch (err) {
+                result = { output: `工具执行异常: ${err.message || String(err)}`, isError: true };
+              }
               if (result.needsApproval) {
                 // 子代理权限不足：立即终止，把决策交回主代理
                 blocked = result.approvalReason || result.output || '需要审批的操作';

@@ -140,8 +140,22 @@ function isBlockedHost(hostname) {
   if (process.env.MODEO_ALLOW_LOOPBACK === '1') return false;
   const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
   if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0') return true;
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) {
-    const parts = h.split('.').map(Number);
+  // IPv4 私网/回环/链路本地/CGNAT（2026-08-15 补充：IPv4-mapped IPv6 先解出 IPv4 再查）
+  let v4 = h;
+  if (h.startsWith('::ffff:')) {
+    const tail = h.slice('::ffff:'.length);
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(tail)) {
+      v4 = tail; // ::ffff:127.0.0.1 点分形式
+    } else if (/^[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(tail)) {
+      // ::ffff:7f00:1 hex 形式（Node URL 会规范化 IPv4-mapped 为 hex）
+      const [a, b] = tail.split(':').map((x) => parseInt(x, 16));
+      v4 = `${(a >> 8) & 0xff}.${a & 0xff}.${(b >> 8) & 0xff}.${b & 0xff}`;
+    } else {
+      v4 = ''; // 其他 ::ffff 变体无法解析则按 IPv4 逻辑走（空串不匹配任何段，安全）
+    }
+  }
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(v4)) {
+    const parts = v4.split('.').map(Number);
     if (parts[0] === 127) return true; // 127.0.0.0/8
     if (parts[0] === 10) return true; // 10.0.0.0/8
     if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
@@ -150,6 +164,9 @@ function isBlockedHost(hostname) {
     if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true; // CGNAT
     if (parts[0] === 0) return true;
   }
+  // IPv6：ULA fc00::/7、链路本地 fe80::/10（2026-08-15 修复：此前完全未覆盖）
+  if (/^f[cd][0-9a-f]{2}:/i.test(h)) return true; // fc00::/7（fd00:: 等 ULA）
+  if (/^fe[89ab][0-9a-f]:/i.test(h)) return true; // fe80::/10 链路本地（fe80-febf）
   return false;
 }
 
@@ -158,29 +175,40 @@ async function downloadJson(url, { timeoutMs = 10000, maxBytes = 5 * 1024 * 1024
     throw new PackError('仅支持 http/https 地址');
   }
   // SSRF 防护：拒绝回环/私网/链路本地地址（含云元数据 169.254.169.254）
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new PackError('URL 解析失败');
-  }
-  if (isBlockedHost(parsed.hostname)) {
-    throw new PackError('禁止访问内网/回环地址');
-  }
+  // 手动处理重定向：每一跳都重新校验目标，防公网站 302 到内网/云元数据（审查修复 2026-08-15）
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new PackError(`下载失败 HTTP ${res.status}`);
-    const declared = Number(res.headers.get('content-length') || 0);
-    if (declared > maxBytes) throw new PackError('角色包过大');
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > maxBytes) throw new PackError('角色包过大');
-    try {
-      return JSON.parse(buf.toString('utf8'));
-    } catch {
-      throw new PackError('角色包 JSON 解析失败');
+    let current = url;
+    for (let hop = 0; hop < 5; hop++) {
+      let parsed;
+      try {
+        parsed = new URL(current);
+      } catch {
+        throw new PackError('URL 解析失败');
+      }
+      if (isBlockedHost(parsed.hostname)) {
+        throw new PackError('禁止访问内网/回环地址');
+      }
+      const res = await fetch(current, { signal: controller.signal, redirect: 'manual' });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (!loc) throw new PackError('重定向缺少 Location 头');
+        current = new URL(loc, current).toString();
+        continue;
+      }
+      if (!res.ok) throw new PackError(`下载失败 HTTP ${res.status}`);
+      const declared = Number(res.headers.get('content-length') || 0);
+      if (declared > maxBytes) throw new PackError('角色包过大');
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length > maxBytes) throw new PackError('角色包过大');
+      try {
+        return JSON.parse(buf.toString('utf8'));
+      } catch {
+        throw new PackError('角色包 JSON 解析失败');
+      }
     }
+    throw new PackError('重定向次数过多');
   } catch (err) {
     if (err instanceof PackError) throw err;
     if (err && err.name === 'AbortError') throw new PackError('下载超时');

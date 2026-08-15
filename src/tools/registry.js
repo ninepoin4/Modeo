@@ -7,6 +7,7 @@ import { createWorldStateTool } from './worldStateTool.js';
 import { createRunTestsTool } from './runTestsTool.js';
 import { createReviewChangesTool } from './reviewChangesTool.js';
 import { createAgentTools } from './agentTools.js';
+import { createAskUserTool } from './askUserTool.js';
 
 export function createToolRegistry(toolDefs) {
   const map = new Map();
@@ -55,6 +56,7 @@ export function createAllTools(workspaceRoot, extraTools = []) {
     ...code.list().map((name) => code.get(name)),
     world,
     agents.spawn_agent,
+    createAskUserTool(),
     ...extraTools,
   ]);
 }

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { atomicWriteFileSync } from './atomic.js';
 
 const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 const DATA_DIR = process.env.MODEO_DATA_DIR ? path.resolve(process.env.MODEO_DATA_DIR) : path.join(ROOT, 'data');
@@ -76,7 +77,7 @@ export function deleteSession(id) {
 
 export function saveSession(session) {
   session.updatedAt = new Date().toISOString();
-  fs.writeFileSync(fileOf(session.id), JSON.stringify(session, null, 2), 'utf8');
+  atomicWriteFileSync(fileOf(session.id), JSON.stringify(session, null, 2), 'utf8');
 }
 
 export function resetSessions() {
@@ -164,6 +165,29 @@ export function exportSession(id) {
 }
 
 /**
+ * 导入消息清洗：只允许 user/assistant/tool（防导入 role:system 注入系统提示词，2026-08-15 修复）。
+ * assistant 保留 toolCalls（配对完整）；tool 必须带 toolCallId（否则 OpenAI 400）。
+ */
+function sanitizeMessages(arr) {
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (const m of arr) {
+    if (!m || typeof m !== 'object') continue;
+    const role = m.role;
+    if (role === 'user' || role === 'assistant') {
+      const clean = { role, content: typeof m.content === 'string' ? m.content : '' };
+      if (Array.isArray(m.toolCalls) && m.toolCalls.length) clean.toolCalls = m.toolCalls;
+      if (typeof m.id === 'string') clean.id = m.id;
+      out.push(clean);
+    } else if (role === 'tool' && typeof m.toolCallId === 'string') {
+      out.push({ role: 'tool', content: typeof m.content === 'string' ? m.content : '', toolCallId: m.toolCallId });
+    }
+    // system / notice / 未知角色一律丢弃
+  }
+  return out;
+}
+
+/**
  * 导入会话：校验形状后以新 id 落盘。
  */
 export function importSession(data) {
@@ -179,7 +203,7 @@ export function importSession(data) {
     title: data.title || '导入会话',
     createdAt: now,
     updatedAt: now,
-    messages: data.messages,
+    messages: sanitizeMessages(data.messages),
     modeLog: Array.isArray(data.modeLog) ? data.modeLog : [],
     worldState: data.worldState && typeof data.worldState === 'object' && !Array.isArray(data.worldState) ? data.worldState : {},
     goal: typeof data.goal === 'string' ? data.goal : null,

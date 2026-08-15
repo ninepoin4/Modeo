@@ -197,10 +197,20 @@ export class OpenAIProvider {
     const decoder = new TextDecoder();
     let buf = '';
     let toolCalls = [];
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
+    // 响应体空闲超时（2026-08-15 修复：原先只有响应头前超时，模型中途挂起会无限占用 SSE 与会话锁）
+    const IDLE_TIMEOUT_MS = 60000;
+    let idleTimer = null;
+    const resetIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS);
+    };
+    resetIdle();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        resetIdle();
+        buf += decoder.decode(value, { stream: true });
       const lines = buf.split('\n');
       buf = lines.pop() || '';
       for (const line of lines) {
@@ -245,6 +255,9 @@ export class OpenAIProvider {
           return { id: tc.id || `tc-${tc.index}`, name: tc.name, args };
         }),
       };
+    }
+    } finally {
+      if (idleTimer) clearTimeout(idleTimer);
     }
   }
 }
