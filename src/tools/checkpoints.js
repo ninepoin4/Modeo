@@ -10,6 +10,17 @@ const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.ur
 const MAX_PER_SESSION = 20;
 /** 单会话快照总大小上限（超过则从最旧开始删除） */
 const MAX_TOTAL_BYTES = 500 * 1024 * 1024;
+/**
+ * 快照排除的大目录（2026-08-17 审查修复）：node_modules/.git 等体积大头此前每次变更
+ * 都全量复制（大仓库秒级 IO + GB 级磁盘）；依赖/版本历史可重装/可保留，
+ * 快照只覆盖源码——撤销代码改动不受影响。恢复时这些目录保持当前状态不删。
+ */
+const SNAPSHOT_EXCLUDES = new Set(['node_modules', '.git', 'dist', 'build', '.cache', 'venv', '.venv', '__pycache__']);
+
+/** 顶层条目是否应排除出快照（含隐藏的 node_modules/.git 等） */
+function isExcluded(name) {
+  return SNAPSHOT_EXCLUDES.has(name);
+}
 
 function dirSize(dir) {
   let total = 0;
@@ -93,8 +104,9 @@ export function createCheckpoint({ sessionId, workspaceRoot, label = '自动快�
   const id = `${Date.now()}-${randomUUID().slice(0, 8)}`;
   const target = path.join(dir, id);
   fs.mkdirSync(target, { recursive: true });
-  // 复制工作区全部文件（保留目录结构）
+  // 复制工作区全部文件（保留目录结构；排除依赖/缓存大目录）
   for (const entry of fs.readdirSync(workspaceRoot, { withFileTypes: true })) {
+    if (isExcluded(entry.name)) continue;
     fs.cpSync(path.join(workspaceRoot, entry.name), path.join(target, entry.name), { recursive: true });
   }
   prune(sessionId);
@@ -153,13 +165,17 @@ export function restoreCheckpoint({ sessionId, checkpointId, workspaceRoot }) {
   if (!isAllowedWorkspace(workspaceRoot)) throw new Error('工作区路径非法');
   const src = checkpointPath(sessionId, checkpointId);
   if (!fs.existsSync(src)) throw new Error('快照不存在');
-  fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  // 恢复时保留排除目录（node_modules/.git 等维持当前状态），只删源码内容
+  for (const entry of fs.readdirSync(workspaceRoot, { withFileTypes: true })) {
+    if (isExcluded(entry.name)) continue;
+    fs.rmSync(path.join(workspaceRoot, entry.name), { recursive: true, force: true });
+  }
   fs.mkdirSync(workspaceRoot, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     if (entry.name === '.meta.json') continue;
     fs.cpSync(path.join(src, entry.name), path.join(workspaceRoot, entry.name), { recursive: true });
   }
-  return { restoredFiles: countFiles(workspaceRoot) };
+  return { restoredFiles: countFiles(src) };
 }
 
 /**
@@ -184,6 +200,7 @@ export function ensureBaseline(sessionId, workspaceRoot) {
   }
   fs.mkdirSync(dir, { recursive: true });
   for (const entry of fs.readdirSync(workspaceRoot, { withFileTypes: true })) {
+    if (isExcluded(entry.name)) continue;
     fs.cpSync(path.join(workspaceRoot, entry.name), path.join(dir, entry.name), { recursive: true });
   }
   return { created: true, fileCount: countFiles(dir), dir };

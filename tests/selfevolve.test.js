@@ -423,3 +423,47 @@ test('shell 敏感检测：$TOKEN/$env: 修复与 settings.json 移除', () => {
   assert.equal(isSensitiveAccess('cat id_rsa'), true);
   assert.equal(isSensitiveAccess(String.raw`type "C:\Users\me\.ssh\id_ed25519"`), true);
 });
+
+test('engine: 孤儿 tool_calls 崩溃残留自动清理（防真实模型 400 锁死）', async () => {
+  const session = makeSession('code');
+  session.messages.push({ role: 'user', content: '继续', id: 'u1' });
+  // 模拟崩溃残留：assistant(tool_calls) 无配对 tool 消息
+  session.messages.push({ role: 'assistant', content: '', id: 'a1', toolCalls: [{ id: 'tc-orphan', name: 'write_file', args: { path: 'x.txt', content: 'x' } }] });
+  const harness = harnesses.find((h) => h.id === 'code');
+  const events = await collectEvents({
+    session,
+    harness,
+    character: null,
+    provider: new SelfEvolveProvider(0),
+    toolRegistry: createCodeTools(wsRoot),
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: {},
+  });
+  const msgs = store.getSession(session.id).messages;
+  assert.ok(!msgs.some((m) => m.role === 'assistant' && m.toolCalls), '孤儿 assistant(tool_calls) 应被清理');
+  assert.ok(msgs.some((m) => m.role === 'notice' && /中断的工具调用/.test(m.content)), '应有清理提示 notice');
+  assert.ok(events.some((e) => e.type === 'done'), '清理后对话应正常完成');
+});
+
+test('engine: 有配对的 tool 消息不被误清', async () => {
+  const session = makeSession('code');
+  session.messages.push({ role: 'user', content: 'write file please', id: 'u1' });
+  session.messages.push({ role: 'assistant', content: '', id: 'a1', toolCalls: [{ id: 'tc-ok', name: 'write_file', args: { path: 'x.txt', content: 'x' } }] });
+  session.messages.push({ role: 'tool', content: '已写入', id: 't1', toolCallId: 'tc-ok', name: 'write_file' });
+  const harness = harnesses.find((h) => h.id === 'code');
+  await collectEvents({
+    session,
+    harness,
+    character: null,
+    provider: new SelfEvolveProvider(0),
+    toolRegistry: createCodeTools(wsRoot),
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: {},
+  });
+  const msgs = store.getSession(session.id).messages;
+  assert.ok(msgs.some((m) => m.role === 'assistant' && m.toolCalls), '配对完整的 assistant 不应被清理');
+});

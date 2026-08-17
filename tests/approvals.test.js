@@ -48,3 +48,20 @@ test('approvals: 不存在的审批抛错', () => {
   assert.throws(() => approvals.getApproval('nope'), /不存在/);
   assert.throws(() => approvals.approve('nope'), /不存在/);
 });
+
+test('approvals: 已决审批超出上限自动清理（防 approvals.json 无限增长）', () => {
+  // 创建 60 个审批并全部批准（每个都触发 persistAll → prune）
+  for (let i = 0; i < 60; i++) {
+    const a = approvals.createApproval({ sessionId: 's1', toolCall: { id: `t-clean-${i}`, name: 'x', args: {} }, summary: `s${i}` });
+    approvals.approve(a.id);
+  }
+  const data = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'approvals.json'), 'utf8'));
+  const entries = Object.values(data);
+  const decided = entries.filter((x) => x.status !== 'pending');
+  assert.ok(decided.length <= 50, `已决审批应裁剪到 50 条以内，实际 ${decided.length}`);
+  assert.ok(entries.length <= 60, `文件总量应受控（≤50 已决 + pending），实际 ${entries.length}`);
+  // 最近批准的仍可查询（未被误删）
+  const newest = entries.sort((a, b) => (b.decidedAt || '').localeCompare(a.decidedAt || ''))[0];
+  assert.equal(newest.status, 'approved');
+  assert.ok(approvals.getApproval(newest.id).id === newest.id);
+});

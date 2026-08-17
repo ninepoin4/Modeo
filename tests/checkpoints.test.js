@@ -58,3 +58,26 @@ test('checkpoint: 工作区路径越界拒绝恢复', () => {
   );
   fs.rmSync(outside, { recursive: true, force: true });
 });
+
+test('checkpoint: 快照排除大目录（node_modules/.git），恢复时保留不还原', () => {
+  // 造带依赖/版本历史的大目录
+  fs.mkdirSync(path.join(WS_ROOT, 'node_modules', 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(WS_ROOT, 'node_modules', 'pkg', 'dep.js'), 'dep-v1');
+  fs.mkdirSync(path.join(WS_ROOT, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(WS_ROOT, '.git', 'HEAD'), 'ref-v1');
+  const snap = ck.createCheckpoint({ sessionId: SID, workspaceRoot: WS_ROOT, label: '排除测试' });
+  // 快照里不应有大目录
+  const snapDir = path.join(DATA_DIR, 'checkpoints', SID, snap.id);
+  assert.ok(!fs.existsSync(path.join(snapDir, 'node_modules')), '快照不应含 node_modules');
+  assert.ok(!fs.existsSync(path.join(snapDir, '.git')), '快照不应含 .git');
+  // 改源码 + 改大目录内容
+  fs.writeFileSync(path.join(WS_ROOT, 'a.txt'), 'v3');
+  fs.writeFileSync(path.join(WS_ROOT, 'node_modules', 'pkg', 'dep.js'), 'dep-v2');
+  const restored = ck.restoreCheckpoint({ sessionId: SID, checkpointId: snap.id, workspaceRoot: WS_ROOT });
+  // 源码还原，大目录保留当前状态
+  assert.equal(fs.readFileSync(path.join(WS_ROOT, 'a.txt'), 'utf8'), 'v1');
+  assert.ok(fs.existsSync(path.join(WS_ROOT, 'node_modules', 'pkg', 'dep.js')));
+  assert.equal(fs.readFileSync(path.join(WS_ROOT, 'node_modules', 'pkg', 'dep.js'), 'utf8'), 'dep-v2');
+  assert.ok(fs.existsSync(path.join(WS_ROOT, '.git', 'HEAD')));
+  assert.equal(restored.restoredFiles >= 2, true);
+});

@@ -11,6 +11,9 @@ const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.ur
 const DATA_DIR = process.env.MODEO_DATA_DIR ? path.resolve(process.env.MODEO_DATA_DIR) : path.join(ROOT, 'data');
 const FILE = path.join(DATA_DIR, 'approvals.json');
 
+/** 已决/过期审批最多保留条数（审计/展示用），超出在落盘时清理，防 approvals.json 无限增长 */
+const KEEP_DECIDED = 50;
+
 function loadAll() {
   try {
     return new Map(Object.entries(JSON.parse(fs.readFileSync(FILE, 'utf8'))));
@@ -19,7 +22,17 @@ function loadAll() {
   }
 }
 
+/** 2026-08-17 审查修复：已决/过期审批只保留最近 KEEP_DECIDED 条，其余删除 */
+function prune() {
+  const decided = [...pending.values()]
+    .filter((a) => a.status !== 'pending')
+    .sort((a, b) => (b.decidedAt || b.createdAt || '').localeCompare(a.decidedAt || a.createdAt || ''));
+  if (decided.length <= KEEP_DECIDED) return;
+  for (let i = KEEP_DECIDED; i < decided.length; i++) pending.delete(decided[i].id);
+}
+
 function persistAll() {
+  prune();
   fs.mkdirSync(DATA_DIR, { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(pending), null, 2), 'utf8');
 }

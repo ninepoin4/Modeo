@@ -305,6 +305,32 @@ export async function runAgentTurn(opts) {
       if (systemPrompt) messages = [msg('system', systemPrompt), ...messages];
     }
 
+    // 孤儿 tool_calls 自愈（2026-08-17 审查修复）：进程崩溃后重启，历史可能残留
+    // assistant(tool_calls) 但缺配对 tool 消息——真实模型收到会 400 会话锁死。
+    // 非 resume 时扫描并移除无配对的 assistant 消息（notice 提示，不发给模型）。
+    if (!resume) {
+      const toolIds = new Set();
+      for (const m of session.messages) {
+        if (m.role === 'tool' && m.toolCallId) toolIds.add(m.toolCallId);
+      }
+      const beforeLen = session.messages.length;
+      session.messages = session.messages.filter((m) => {
+        if (m.role === 'assistant' && Array.isArray(m.toolCalls) && m.toolCalls.length) {
+          const allPaired = m.toolCalls.every((tc) => toolIds.has(tc.id));
+          if (!allPaired) return false;
+        }
+        return true;
+      });
+      if (session.messages.length !== beforeLen) {
+        session.messages.unshift(
+          msg('notice', '检测到中断的工具调用，已自动清理以保证对话可用（如任务未完成请重新描述）')
+        );
+        persist(session);
+        messages = session.messages.map(cleanForProvider).filter(Boolean);
+        if (systemPrompt) messages = [msg('system', systemPrompt), ...messages];
+      }
+    }
+
     // 自动压缩（2026-08-15 修复：compactAfter 此前是死配置，长会话永不压缩，
     // 消息无限增长最终撞模型上下文上限）。非 resume 且超过阈值时压缩历史。
     const compactThreshold = Number(harness?.context?.compactAfter) || 0;
