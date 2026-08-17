@@ -1155,6 +1155,10 @@ const server = http.createServer(async (req, res) => {
       if (body.apiKey === '' && loadSettings().apiKey) {
         settings.apiKey = loadSettings().apiKey;
       }
+      // 2026-08-17 审查修复：apiKey === null 显式清除（此前密钥一旦设置永久无法删除）
+      if (body.apiKey === null) {
+        settings.apiKey = '';
+      }
       saveSettings(settings);
       return sendJson(res, 200, { settings: publicSettings(settings) });
     }

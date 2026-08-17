@@ -9,7 +9,7 @@ import { getEffectiveSystemPrompt, renderCharacterPrompt } from '../core/harness
 import { createCheckpoint, writeCheckpointMeta } from '../tools/checkpoints.js';
 import { compressSession } from './compress.js';
 import { withToolTimeout } from '../core/exec.js';
-import { skillsToPromptText } from '../core/skillStore.js';
+import { skillsToPromptText, recordSkillUsage } from '../core/skillStore.js';
 import { distillSkill } from './distill.js';
 
 /**
@@ -189,6 +189,13 @@ export async function runAgentTurn(opts) {
     let messages = session.messages.map(cleanForProvider).filter(Boolean);
     if (systemPrompt) messages = [msg('system', systemPrompt), ...messages];
 
+    // resume 幂等守卫（2026-08-17 审查修复）：resume 只用于继续"被挂起的审批/提问"。
+    // 无任何挂起内容时拒绝——否则网络重试/双击/误调会直接跑全新 turn，
+    // 无审批模式下破坏性命令可能重复执行、有审批模式下产生第二个重复审批。
+    if (resume && !session.pendingApproval && !session.pendingQuestion) {
+      throw new Error('没有待恢复的操作（审批或提问已处理完），请直接发送新消息');
+    }
+
     // resume：处理被审批挂起的工具调用
     if (resume && session.pendingApproval) {
       const pending = session.pendingApproval;
@@ -197,7 +204,8 @@ export async function runAgentTurn(opts) {
 
       if (approval.status === 'approved') {
         const tool = toolRegistry.get(pending.toolCall.name);
-        snapshotBefore(session, workspaceRoot, pending.toolCall, emit);
+        // 2026-08-17 审查修复：不再在此重复打快照——撤销点在审批创建前已打
+        // （预检执行路径或 all 模式审批创建前），此处再打会覆盖最初的撤销点。
         const ctx = { ...baseCtx, forceApproved: true };
         let raw;
         try {
@@ -407,9 +415,11 @@ export async function runAgentTurn(opts) {
           // 先判定是否需审批：all 模式任何工具都先审批；dangerous-only 模式由工具预检（危险命令不实际执行）
           let needsApproval = approvalMode === 'all';
           let result = null;
+          let snapshotDone = false; // 2026-08-17 审查修复：每个工具最多打一次快照（预检打过的审批不再打，resume 也不重复打）
           if (!needsApproval) {
             // 变更型工具在预检执行前先打快照（撤销点）
             snapshotBefore(session, workspaceRoot, tc, emit);
+            snapshotDone = true;
             try {
               // 每工具超时统一裁决（2026-08-15）：工具可声明 timeoutMs，超时返回结构化结果
               result = await withToolTimeout(tc.name, tool.execute(effArgs, ctx), tool.timeoutMs);
@@ -425,11 +435,17 @@ export async function runAgentTurn(opts) {
               // 第一个需审批工具：创建审批并挂起会话（同批其余工具继续执行，
               // 避免 assistant.tool_calls 里的其他调用变孤儿导致真实模型 400）
               // 审批挂起记录实际要执行的参数（pre 钩子改写后）
+              // all 模式无预检执行：审批创建前补打快照（撤销点）
+              if (!snapshotDone) {
+                snapshotBefore(session, workspaceRoot, tc, emit);
+                snapshotDone = true;
+              }
               const approvalTc = effArgs !== tc.args ? { ...tc, args: effArgs } : tc;
               const approval = approvals.createApproval({
                 sessionId: session.id,
                 toolCall: approvalTc,
-                summary: (result && result.approvalReason) || `${approvalTc.name} ${JSON.stringify(approvalTc.args)}`,
+                // 2026-08-17 审查修复：摘要截断 500 字符——大参数（如 2MB write_file）此前生成 2MB+ 摘要持久化并经 SSE 发送
+                summary: (result && result.approvalReason) || `${approvalTc.name} ${JSON.stringify(approvalTc.args).slice(0, 500)}`,
               });
               session.pendingApproval = { approvalId: approval.id, toolCall: approvalTc };
               persist(session);
@@ -472,11 +488,24 @@ export async function runAgentTurn(opts) {
       session.messages.push(finalMsg);
       session.updatedAt = new Date().toISOString();
       persist(session);
+      // 技能质量门控登记（2026-08-17 审查修复：recordSkillUsage 此前无运行时调用，
+      // score 恒 0.5、归档规则永不生效——现在每轮使用过技能即登记结果，
+      // 本轮工具错误 >0 视为技能未帮上忙（记失败），驱动 score 升降与自动归档）。
+      if (dataDir && Array.isArray(skills) && skills.length) {
+        for (const s of skills) recordSkillUsage(dataDir, s.name, toolErrorCount === 0);
+      }
       // 技能沉淀（自进化，2026-08-17）：code 模式完成一轮且满足触发条件
-      // （≥5 次工具调用或 ≥1 次工具错误）时，用一次轻量 LLM 调用把轨迹提炼为
-      // 技能文件存 skills/；失败/超时静默，不阻塞 done。resume 轮不重复触发。
+      // （≥5 次工具调用或 ≥1 次工具错误）时，把轨迹提炼为技能文件存 skills/。
+      // 2026-08-17 审查修复：distill 此前 await 在 emit DONE 之前、且整体在
+      // withSessionLock 内，SSE 完成延迟可达 15s、期间同会话请求全排队——
+      // 改为 emit done 后 setImmediate 后台执行（fire-and-forget）。runAgentTurn
+      // 返回后会话锁即释放，distill 只写 skills/ 目录不涉及会话文件，无锁冲突；
+      // 失败/超时静默，resume 轮不重复触发。
       if (!resume && harness.id === 'code' && dataDir && (toolCallCount >= 5 || toolErrorCount >= 1)) {
-        await distillSkill({ provider, messages: session.messages, dataDir, sessionId: session.id });
+        const distillMsgs = session.messages;
+        setImmediate(() => {
+          distillSkill({ provider, messages: distillMsgs, dataDir, sessionId: session.id }).catch(() => {});
+        });
       }
       emit({ type: SSE_EVENTS.DONE, messageId: finalMsg.id });
       return { status: 'done', messageId: finalMsg.id };

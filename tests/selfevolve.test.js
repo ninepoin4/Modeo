@@ -20,6 +20,7 @@ import {
 } from '../src/core/skillStore.js';
 import { buildDistillPrompt, parseSkillFromResponse, buildTrajectory, distillSkill } from '../src/runtime/distill.js';
 import { recordToolUsage, recordApprovalRejection, summarizePreferences, getPreferences } from '../src/core/preferences.js';
+import { isSensitiveAccess } from '../src/tools/shellTool.js';
 import { runAgentTurn, assembleSystemPrompt } from '../src/runtime/engine.js';
 import { loadHarnessConfigs } from '../src/core/harness.js';
 import * as approvals from '../src/core/approvals.js';
@@ -270,9 +271,62 @@ test('engine: code 模式 ≥5 次工具调用 → done 后自动沉淀技能', 
     dataDir: data,
   });
   assert.ok(events.some((e) => e.type === 'done'));
+  // 2026-08-17 审查修复：distill 改为 setImmediate 后台执行（不再 await 阻塞 done），需等待落盘
+  await new Promise((r) => setTimeout(r, 100));
   const skill = getSkill(data, 'multi-tool-flow');
   assert.ok(skill, '应自动沉淀技能');
   assert.match(skill.content, /写文件/);
+  fs.rmSync(data, { recursive: true, force: true });
+});
+
+test('engine: resume 无挂起内容时拒绝（幂等守卫，防重试重复执行）', async () => {
+  const data = tmpData();
+  const session = makeSession('code');
+  session.messages.push({ role: 'user', content: '你好', id: 'u1' });
+  const harness = harnesses.find((h) => h.id === 'code');
+  const events = await collectEvents({
+    session,
+    harness,
+    character: null,
+    provider: new SelfEvolveProvider(0),
+    toolRegistry: createCodeTools(wsRoot),
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: {},
+    resume: true,
+    dataDir: data,
+  });
+  const err = events.find((e) => e.type === 'error');
+  assert.ok(err && /没有待恢复的操作/.test(err.message), `空 resume 应报错，实际 ${JSON.stringify(events.map((e) => e.type))}`);
+  // 且不能产生任何 tool_call（不能跑全新 turn 重复执行）
+  assert.ok(!events.some((e) => e.type === 'tool_call'), '不应执行任何工具');
+  fs.rmSync(data, { recursive: true, force: true });
+});
+
+test('engine: 技能使用后质量门控计次（recordSkillUsage 运行时生效）', async () => {
+  const data = tmpData();
+  saveSkill(data, { name: 'used-skill', triggers: ['多步'], content: 'x' });
+  const session = makeSession('code');
+  session.messages.push({ role: 'user', content: '帮我做多步任务', id: 'u1' });
+  const harness = harnesses.find((h) => h.id === 'code');
+  await collectEvents({
+    session,
+    harness,
+    character: null,
+    provider: new SelfEvolveProvider(1),
+    toolRegistry: createCodeTools(wsRoot),
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: {},
+    dataDir: data,
+    skills: matchSkills(data, '帮我做多步任务'),
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  const s = getSkill(data, 'used-skill');
+  assert.equal(s.usage, 1, '技能被注入使用后应计次');
+  assert.equal(s.status, 'active');
   fs.rmSync(data, { recursive: true, force: true });
 });
 
@@ -354,4 +408,18 @@ test('engine: assembleSystemPrompt 无技能/偏好时不注入', () => {
   const prompt = assembleSystemPrompt(harness, [], wsRoot, null, 'dangerous-only', {});
   assert.ok(!prompt.includes('已沉淀技能'));
   assert.ok(!prompt.includes('使用偏好'));
+});
+test('shell 敏感检测：$TOKEN/$env: 修复与 settings.json 移除', () => {
+  // 2026-08-17 审查修复项
+  assert.equal(isSensitiveAccess('echo $TOKEN'), true, '$TOKEN 应敏感');
+  assert.equal(isSensitiveAccess('echo $env:AWS_SECRET_ACCESS_KEY'), true, '$env: 应敏感');
+  assert.equal(isSensitiveAccess('echo $MY_API_KEY'), true);
+  // 非敏感
+  assert.equal(isSensitiveAccess('echo $HOME'), false);
+  assert.equal(isSensitiveAccess('cat settings.json'), false, '普通 settings.json 不再敏感');
+  assert.equal(isSensitiveAccess('cat package.json'), false);
+  // 原有敏感仍命中（路径用 String.raw 防 JS 转义吞反斜杠）
+  assert.equal(isSensitiveAccess('cat .env'), true);
+  assert.equal(isSensitiveAccess('cat id_rsa'), true);
+  assert.equal(isSensitiveAccess(String.raw`type "C:\Users\me\.ssh\id_ed25519"`), true);
 });

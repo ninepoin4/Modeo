@@ -50,6 +50,18 @@ function Bubble({ m, streaming, delay }) {
       </div>
     );
   }
+  // 2026-08-17 审查修复（F4 兜底）：role:'tool' 若混入消息列表，不再按助手气泡渲染
+  // （工具输出在流式阶段进 toolLog；此处防御性折叠为窄体小字，防 64KB 输出刷屏）
+  if (m.role === 'tool') {
+    const t = String(m.content || '').trim();
+    return (
+      <div className="flex justify-center py-1">
+        <span className="max-w-[80%] truncate rounded-lg border border-line bg-paper2 px-2.5 py-1 text-center font-mono text-xs text-muted">
+          {t.length > 120 ? `${t.slice(0, 120)}…` : t}
+        </span>
+      </div>
+    );
+  }
   const isUser = m.role === 'user';
   const copy = async () => {
     try {
@@ -295,7 +307,7 @@ export default function ChatArea({ session, messages, streaming, characterName, 
                     value={modelDraft}
                     onChange={(e) => setModelDraft(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                         e.preventDefault();
                         confirmModel();
                       } else if (e.key === 'Escape') {
@@ -480,7 +492,7 @@ export default function ChatArea({ session, messages, streaming, characterName, 
                 if (cmd) setText(`/${cmd.names[0]} `);
                 return;
               }
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 if (showSuggest && filteredCommands[suggestIdx]) {
                   runSuggestion(filteredCommands[suggestIdx]);

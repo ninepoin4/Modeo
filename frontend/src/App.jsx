@@ -227,6 +227,9 @@ export default function App() {
         setStreaming(false);
       } else if (evt.type === 'done') {
         setStreaming(false);
+        // 2026-08-17 审查修复：兜底清理挂起弹窗（正常流程审批挂起时不会到 done，防御残留）
+        setPendingApproval(null);
+        setPendingQuestion(null);
         setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
         // done 后同步最终会话状态（后端可能补充标题/摘要），并刷新侧边栏列表
         const doneSessionId = session?.id;
@@ -235,12 +238,16 @@ export default function App() {
             // 防串台：期间若已切换到其他会话，丢弃过期回包
             if (activeSessionIdRef.current !== doneSessionId) return;
             setSession(r.session);
-            setMessages(r.session.messages || []);
+            // 2026-08-17 审查修复：tool 结果不渲染进聊天区（F4）——工具输出已在流式
+            // 阶段进 toolLog，done 快照若含 role:'tool' 会以助手气泡混入刷屏
+            setMessages((r.session.messages || []).filter((m) => m.role !== 'tool'));
           });
           refreshSessions();
         }
       } else if (evt.type === 'error') {
         setStreaming(false);
+        setPendingApproval(null);
+        setPendingQuestion(null);
         setMessages((prev) => [...prev, { role: 'assistant', content: `错误：${evt.message}`, id: uid() }]);
       }
     },
@@ -249,8 +256,13 @@ export default function App() {
 
   const sendMessage = useCallback(
     async (content, modelOverride) => {
+      // 2026-08-17 审查修复（F3）：无会话时不再静默丢弃输入——明确提示用户先新建会话
+      if (!session) {
+        toast('请先新建会话再发送消息', 'info');
+        return;
+      }
       // ref 镜像防抖：React 批处理窗口内连按 Enter 也只会发一次（state 闭包可能读到旧值）
-      if (!session || streaming || sendingRef.current) return;
+      if (streaming || sendingRef.current) return;
       sendingRef.current = true;
       setStreaming(true);
       setMessages((prev) => [...prev, { role: 'user', content, id: uid() }]);
@@ -278,7 +290,7 @@ export default function App() {
       // 兜底清除残留 streaming 标记（abort/断流时 done 事件可能未到达）
       setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
     },
-    [session, streaming, handleStreamEvent]
+    [session, streaming, handleStreamEvent, toast]
   );
 
   const stopStreaming = useCallback(() => {
@@ -322,13 +334,13 @@ export default function App() {
       const a = pendingApproval;
       if (!a) return;
       setPendingApproval(null);
-    setPendingQuestion(null);
-      // 审批决策本身失败：恢复 pendingApproval，允许用户重试（不丢审批上下文）
+      // 2026-08-17 审查修复：不再无条件关闭问题弹窗——审批与提问同批挂起时
+      // 各自独立处理（F5：decideApproval 只管审批，question 由用户回答/跳过）
+      // 审批决策本身失败：关闭弹窗 + 提示（不还原——还原会因 TTL 过期形成"批准→失败→还原"死循环锁死应用）
       try {
         await api.decideApproval(a.approvalId, decision, session.id, argsOverride);
       } catch (e) {
-        setPendingApproval(a);
-        setMessages((prev) => [...prev, { role: 'assistant', content: `审批操作失败：${e.message}`, id: uid() }]);
+        setMessages((prev) => [...prev, { role: 'assistant', content: `审批操作失败：${e.message}（审批可能已超时，请重新发送消息发起操作）`, id: uid() }]);
         return;
       }
       if (decision === 'deny') {
@@ -377,8 +389,8 @@ export default function App() {
         if (skipped) await api.skipQuestion(session.id);
         else await api.answerQuestion(session.id, answer);
       } catch (e) {
-        setPendingQuestion(q);
-        setMessages((prev) => [...prev, { role: 'assistant', content: `回答提交失败：${e.message}`, id: uid() }]);
+        // 2026-08-17 审查修复：不再还原弹窗——404「没有待回答的问题」时还原会死循环锁死应用
+        setMessages((prev) => [...prev, { role: 'assistant', content: `回答提交失败：${e.message}（问题可能已失效，请直接发送消息继续）`, id: uid() }]);
         return;
       }
       setStreaming(true);

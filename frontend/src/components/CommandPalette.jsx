@@ -51,7 +51,7 @@ export default function CommandPalette({ open, onClose, commands }) {
                 } else if (e.key === 'ArrowUp') {
                   e.preventDefault();
                   setIndex((i) => Math.max(i - 1, 0));
-                } else if (e.key === 'Enter' && filtered[index]) {
+                } else if (e.key === 'Enter' && !e.nativeEvent.isComposing && filtered[index]) {
                   e.preventDefault();
                   run(filtered[index]);
                 }

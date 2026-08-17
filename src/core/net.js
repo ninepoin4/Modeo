@@ -53,7 +53,7 @@ function proxyAuth(proxyUrl) {
 }
 
 /** 通过 HTTP 代理建立 CONNECT 隧道，返回已连接 socket（尚未 TLS） */
-function connectTunnel(proxyUrl, targetHost, targetPort) {
+function connectTunnel(proxyUrl, targetHost, targetPort, signal) {
   return new Promise((resolve, reject) => {
     const p = new URL(proxyUrl);
     const auth = proxyAuth(proxyUrl);
@@ -65,6 +65,11 @@ function connectTunnel(proxyUrl, targetHost, targetPort) {
       method: 'CONNECT',
       path: `${targetHost}:${targetPort}`,
       headers,
+      signal, // 2026-08-17 审查修复：透传 AbortSignal——此前代理挂起时 provider 超时/客户端断开都无法中断，永久占 SSE 与会话锁
+    });
+    // 代理 CONNECT 阶段自身超时兜底（signal 可能因调用方场景缺失；15s 足够握手）
+    req.setTimeout(15000, () => {
+      req.destroy(new Error('代理 CONNECT 超时'));
     });
     req.on('connect', (res, socket) => {
       if (res.statusCode !== 200) {
@@ -172,7 +177,7 @@ export async function netFetch(targetUrl, opts = {}) {
       });
     };
     if (proxy) {
-      const sock = await connectTunnel(proxy, u.hostname, Number(u.port) || 443);
+      const sock = await connectTunnel(proxy, u.hostname, Number(u.port) || 443, opts.signal);
       return await doHttps(sock);
     }
     return await doHttps(null);

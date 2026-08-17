@@ -77,11 +77,16 @@ const SENSITIVE_PATH_PATTERNS = [
   // 读取/复制类命令 + 敏感路径 token（点目录/凭据文件）
   // 注意：\.pem/\.key 不走此规则——它们带点，前一个字符若非分隔符会漏检（如 `cat app.pem`），
   // 已拆分为下方独立规则（匹配任意文件名结尾的 .pem/.key）。
-  /(?:^|[;\s&|])(?:cat|type|more|less|head|tail|print|Get-Content|Copy-Item|cp|scp|curl|wget|Invoke-WebRequest|xcopy|robocopy)[^\n]*(?:[\s./\\]|^)(?:id_rsa|id_ed25519|id_ecdsa|\.ssh|\.aws|credentials|\.env|settings\.json|\.gnupg)\b/i,
+  // 2026-08-17 审查修复：移除 `settings\.json`——它是常见业务文件名（项目自带 settings.json
+  // 会被无差别触发审批），且不含凭据；真正敏感的凭据文件由 .env/id_rsa/.ssh/.aws 等覆盖。
+  /(?:^|[;\s&|])(?:cat|type|more|less|head|tail|print|Get-Content|Copy-Item|cp|scp|curl|wget|Invoke-WebRequest|xcopy|robocopy)[^\n]*(?:[\s./\\]|^)(?:id_rsa|id_ed25519|id_ecdsa|\.ssh|\.aws|credentials|\.env|\.gnupg)\b/i,
   // 私钥/证书文件：任意文件名以 .pem / .key 结尾（app.pem、x.key、server.key 等）
   /(?:^|[;\s&|])(?:cat|type|more|less|head|tail|print|Get-Content|Copy-Item|cp|scp|curl|wget|Invoke-WebRequest|xcopy|robocopy)[^\n]*\.(?:pem|key)\b/i,
   // 环境变量泄漏（Windows $env: / Unix $VAR）
-  /(?:^|[;\s&|])(?:echo|print|Write-Output|env|printenv|Get-Content)[^\n]*\$[A-Za-z_]+(?:KEY|TOKEN|SECRET|PASSWORD)/i,
+  // 2026-08-17 审查修复：`[A-Za-z_]+` 贪婪会吃掉变量名导致 `$TOKEN` 漏报（+ 后必须跟
+  // KEY/TOKEN 等后缀且边界在末尾），且 `$env:` 冒号不匹配——改为 `[A-Za-z_]*` 允许
+  // 变量名仅由敏感后缀组成，并补 `env:` 前缀分支。
+  /(?:^|[;\s&|])(?:echo|print|Write-Output|env|printenv|Get-Content)[^\n]*\$(?:env:)?[A-Za-z_]*(?:KEY|TOKEN|SECRET|PASSWORD)\b/i,
   // 列出敏感目录
   /(?:^|[;\s&|])(?:dir|ls|find|Get-ChildItem|tree)[^\n]*(?:[\s./\\]|^)\.(?:ssh|aws|gnupg)\b/i,
 ];
