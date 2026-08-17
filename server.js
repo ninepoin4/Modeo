@@ -29,6 +29,8 @@ import { importCcv3, exportCcv3 } from './src/characters/ccv3.js';
 import { importCharacterCardFromPng } from './src/characters/png.js';
 import { buildPack, installPack, listPacks, getPack, savePackFile, deletePack, fetchPackJson, fetchMarketIndex, PackError } from './src/characters/pack.js';
 import { listThemes, getTheme, saveTheme, deleteTheme, uploadThemeBackground, BUILTIN_THEMES } from './src/core/themes.js';
+import { listSkills, deleteSkill, matchSkills } from './src/core/skillStore.js';
+import { getPreferences, recordToolUsage, recordApprovalRejection, summarizePreferences } from './src/core/preferences.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
@@ -272,10 +274,14 @@ async function handleMessages(req, res, id) {
       emit: (e) => {
         events.push(e);
         appendSessionEvent(DATA_DIR, session.id, e);
+        if (e.type === 'tool_result') recordToolUsage(DATA_DIR, e.toolCall?.name);
       },
       settings: loadSettings(),
       toolPipeline,
       modelOverride,
+      dataDir: DATA_DIR,
+      skills: matchSkills(DATA_DIR, content),
+      prefsText: summarizePreferences(getPreferences(DATA_DIR)),
     });
     return sendJson(res, 200, { session, events });
   }
@@ -294,6 +300,7 @@ async function handleMessages(req, res, id) {
   const emit = (e) => {
     // 事件日志：落盘轨迹（tool_call / tool_result / approval / done / error 等）
     appendSessionEvent(DATA_DIR, session.id, e);
+    if (e.type === 'tool_result') recordToolUsage(DATA_DIR, e.toolCall?.name);
     if (res.destroyed) return;
     try {
       res.write(`data: ${JSON.stringify(e)}\n\n`);
@@ -322,6 +329,9 @@ async function handleMessages(req, res, id) {
       signal: abortCtl.signal,
       toolPipeline,
       modelOverride,
+      dataDir: DATA_DIR,
+      skills: matchSkills(DATA_DIR, content),
+      prefsText: summarizePreferences(getPreferences(DATA_DIR)),
     });
   } finally {
     turnDone = true;
@@ -352,6 +362,7 @@ async function handleResume(req, res, id) {
   let turnDone = false;
   const emit = (e) => {
     appendSessionEvent(DATA_DIR, session.id, e);
+    if (e.type === 'tool_result') recordToolUsage(DATA_DIR, e.toolCall?.name);
     if (res.destroyed) return;
     try {
       res.write(`data: ${JSON.stringify(e)}\n\n`);
@@ -379,6 +390,8 @@ async function handleResume(req, res, id) {
       resume: true,
       signal: abortCtl.signal,
       toolPipeline,
+      dataDir: DATA_DIR,
+      prefsText: summarizePreferences(getPreferences(DATA_DIR)),
     });
   } finally {
     turnDone = true;
@@ -400,7 +413,11 @@ function handlePrompt(res, id) {
     }
   }
   const cast = loadCast(session);
-  const systemPrompt = assembleSystemPrompt(harness, cast, WORKSPACE_ROOT, session);
+  const lastUser = [...session.messages].reverse().find((m) => m.role === 'user');
+  const systemPrompt = assembleSystemPrompt(harness, cast, WORKSPACE_ROOT, session, null, {
+    skills: matchSkills(DATA_DIR, lastUser?.content || ''),
+    prefsText: summarizePreferences(getPreferences(DATA_DIR)),
+  });
   const messages = session.messages.filter((m) => m.role !== 'notice').map((m) => ({
     role: m.role,
     content: m.content && m.content.length > 800 ? `${m.content.slice(0, 800)}…（已截断，共 ${m.content.length} 字符）` : m.content,
@@ -1116,7 +1133,10 @@ const server = http.createServer(async (req, res) => {
           }
           if (body.decision === 'deny') {
             approvalsMgr.deny(id, approveSessionId);
-            return sendJson(res, 200, { approval: approvalsMgr.getApproval(id) });
+            const a = approvalsMgr.getApproval(id);
+            // 使用偏好反馈信号（2026-08-17）：记录拒绝的工具，供偏好统计注入
+            recordApprovalRejection(DATA_DIR, a?.toolCall?.name);
+            return sendJson(res, 200, { approval: a });
           }
           return sendJson(res, 400, { error: 'decision 必须是 approve 或 deny' });
         } catch (err) {
@@ -1155,6 +1175,15 @@ const server = http.createServer(async (req, res) => {
     if (method === 'DELETE' && p.startsWith('/api/themes/')) {
       const id = decodeURIComponent(p.slice('/api/themes/'.length));
       return sendJson(res, 200, deleteTheme(id));
+    }
+    // 自进化技能管理（2026-08-17）：GET 列表（含评分/状态），DELETE 删除技能
+    if (method === 'GET' && p === '/api/skills') {
+      return sendJson(res, 200, { skills: listSkills(DATA_DIR) });
+    }
+    if (method === 'DELETE' && p.startsWith('/api/skills/')) {
+      const name = decodeURIComponent(p.slice('/api/skills/'.length));
+      deleteSkill(DATA_DIR, name);
+      return sendJson(res, 200, { ok: true });
     }
     if (method === 'POST' && p === '/api/uploads') {
       const body = JSON.parse(await readBody(req, UPLOAD_BODY_LIMIT));

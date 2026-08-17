@@ -9,12 +9,14 @@ import { getEffectiveSystemPrompt, renderCharacterPrompt } from '../core/harness
 import { createCheckpoint, writeCheckpointMeta } from '../tools/checkpoints.js';
 import { compressSession } from './compress.js';
 import { withToolTimeout } from '../core/exec.js';
+import { skillsToPromptText } from '../core/skillStore.js';
+import { distillSkill } from './distill.js';
 
 /**
  * 组装最终系统提示词：harness 提示词 + 角色渲染 +（code 模式）工作区 AGENTS.md 约定。
  * 导出以便单独测试。
  */
-export function assembleSystemPrompt(harness, character, workspaceRoot, session = null, approvalMode = null) {
+export function assembleSystemPrompt(harness, character, workspaceRoot, session = null, approvalMode = null, extra = {}) {
   const cast = Array.isArray(character) ? character : character ? [character] : [];
   let sys;
   if (harness?.id === 'roleplay' && cast.length) {
@@ -57,6 +59,13 @@ export function assembleSystemPrompt(harness, character, workspaceRoot, session 
           ? '【审批策略】当前为全审批模式：每个工具调用执行前都需要人工审批。正常提出调用，等待批准即可。'
           : '【审批策略】当前为危险命令审批模式：删除/格式化/系统级操作/敏感文件访问等危险命令执行前会弹出审批。不得用编码、引号变体、别名等技巧规避审批——那是绕过安全机制的行为，会被视为违规。';
     sys = sys ? `${sys}\n\n${line}` : line;
+  }
+  // 已沉淀技能注入（自进化技能系统，2026-08-17）：匹配到的历史技能作为经验参考，
+  // 与审批策略同机制标注——技能来自历史任务，是背景参考而非用户指令。
+  if (harness?.id === 'code') {
+    const skillsText = skillsToPromptText(extra?.skills);
+    if (skillsText) sys = sys ? `${sys}\n\n${skillsText}` : skillsText;
+    if (extra?.prefsText) sys = sys ? `${sys}\n\n【使用偏好（自动统计，仅作参考）】${extra.prefsText}` : `【使用偏好（自动统计，仅作参考）】${extra.prefsText}`;
   }
   if (harness?.id === 'roleplay' && session?.worldState) {
     const entries = Object.entries(session.worldState).filter(
@@ -145,13 +154,19 @@ export async function runAgentTurn(opts) {
     signal = null,
     toolPipeline = { pre: [], post: [] },
     modelOverride = null,
+    dataDir = null,
+    skills = null,
+    prefsText = null,
   } = opts;
 
   const cast = characters && characters.length ? characters : character ? [character] : [];
   // 无审批模式（激进）：code 会话可切换；放行一切命令与文件访问
   const aggressive = session?.permissionMode === 'aggressive';
   const approvalMode = aggressive ? 'none' : harness.approval?.mode || 'dangerous-only';
-  let systemPrompt = assembleSystemPrompt(harness, cast, workspaceRoot, session, approvalMode);
+  let systemPrompt = assembleSystemPrompt(harness, cast, workspaceRoot, session, approvalMode, { skills, prefsText });
+  // 技能沉淀触发统计（2026-08-17）：本轮工具调用次数与错误次数，done 时判定是否值得提炼
+  let toolCallCount = 0;
+  let toolErrorCount = 0;
   const maxIterations = harness.context?.maxIterations || 8;
   const tools = (harness.tools || []).map((name) => toolRegistry.get(name)).filter(Boolean);
   // baseCtx 传递执行环境；spawn_agent 等协作型工具依赖 provider/toolRegistry/emit
@@ -344,6 +359,7 @@ export async function runAgentTurn(opts) {
         let approvalPending = false;
         let questionPending = false;
         for (const tc of assistantMsg.toolCalls) {
+          toolCallCount++; // 技能沉淀触发统计
           // ask_user：向用户提问并挂起，等待回答后 resume（2026-08-15 新增）
           if (tc.name === 'ask_user') {
             const q = String(tc.args?.question || '').trim();
@@ -440,11 +456,12 @@ export async function runAgentTurn(opts) {
           }
           session.messages.push(msg('tool', truncateResult(out.output), { id: randomUUID(), toolCallId: tc.id, name: tc.name }));
           emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: tc, result: out });
+          if (out?.isError) toolErrorCount++; // 技能沉淀触发统计（踩坑信号）
         }
         persist(session);
         if (approvalPending) return { status: 'waiting_approval' };
         if (questionPending) return { status: 'waiting_question' };
-        systemPrompt = assembleSystemPrompt(harness, cast, workspaceRoot, session, approvalMode);
+        systemPrompt = assembleSystemPrompt(harness, cast, workspaceRoot, session, approvalMode, { skills, prefsText });
         messages = session.messages.map(cleanForProvider).filter(Boolean);
         if (systemPrompt) messages = [msg('system', systemPrompt), ...messages];
         continue;
@@ -455,6 +472,12 @@ export async function runAgentTurn(opts) {
       session.messages.push(finalMsg);
       session.updatedAt = new Date().toISOString();
       persist(session);
+      // 技能沉淀（自进化，2026-08-17）：code 模式完成一轮且满足触发条件
+      // （≥5 次工具调用或 ≥1 次工具错误）时，用一次轻量 LLM 调用把轨迹提炼为
+      // 技能文件存 skills/；失败/超时静默，不阻塞 done。resume 轮不重复触发。
+      if (!resume && harness.id === 'code' && dataDir && (toolCallCount >= 5 || toolErrorCount >= 1)) {
+        await distillSkill({ provider, messages: session.messages, dataDir, sessionId: session.id });
+      }
       emit({ type: SSE_EVENTS.DONE, messageId: finalMsg.id });
       return { status: 'done', messageId: finalMsg.id };
     }
