@@ -749,6 +749,22 @@ export default function App() {
   }
 
   const activeCharacter = session?.characterId ? characters.find((c) => c.id === session.characterId)?.name : null;
+  // 皮肤背景图（2026-08-18 改）：直接铺在 App 根容器（视口第一层），聊天区透明后图清晰可见。
+  // 遮罩大幅减轻（浅色 0.10 / 深色 0.28），不再有 45% 白雾闷图的问题。
+  const skinUrl =
+    currentTheme && typeof currentTheme.background === 'string' && currentTheme.background.startsWith('/themes/skins/')
+      ? currentTheme.background
+      : '';
+  const skinBgStyle = skinUrl
+    ? {
+        backgroundImage: `linear-gradient(${currentTheme.dark ? 'rgba(8,10,14,0.28)' : 'rgba(250,248,244,0.10)'}, ${
+          currentTheme.dark ? 'rgba(8,10,14,0.28)' : 'rgba(250,248,244,0.10)'
+        }), url("${skinUrl}")`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundAttachment: 'fixed',
+      }
+    : undefined;
   const paletteCommands = [
     { id: 'new', label: '新建会话', hint: 'Ctrl+N', icon: Plus, run: newSession, keywords: '新建 会话 session' },
     ...modes.map((m) => ({
@@ -771,7 +787,10 @@ export default function App() {
   ];
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-transparent text-ink">
+    <div
+      className="flex h-full flex-col overflow-hidden bg-transparent text-ink"
+      style={skinBgStyle}
+    >
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <SessionsSidebar
