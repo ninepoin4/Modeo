@@ -197,6 +197,7 @@ export class OpenAIProvider {
     const decoder = new TextDecoder();
     let buf = '';
     let toolCalls = [];
+    let textDeltaCount = 0;
     // 响应体空闲超时（2026-08-15 修复：原先只有响应头前超时，模型中途挂起会无限占用 SSE 与会话锁）
     const IDLE_TIMEOUT_MS = 60000;
     let idleTimer = null;
@@ -224,7 +225,10 @@ export class OpenAIProvider {
           continue;
         }
         const delta = json.choices?.[0]?.delta || {};
-        if (delta.content) yield { type: 'text_delta', delta: delta.content };
+        if (delta.content) {
+          textDeltaCount++;
+          yield { type: 'text_delta', delta: delta.content };
+        }
         for (const tc of delta.tool_calls || []) {
           const existing = toolCalls.find((x) => x.index === tc.index);
           if (!existing) {
@@ -255,6 +259,18 @@ export class OpenAIProvider {
           return { id: tc.id || `tc-${tc.index}`, name: tc.name, args };
         }),
       };
+    }
+    // 空流自动降级（2026-08-18）：部分上游（如 cun.ai 中转站）对同一 key 短时间内的
+    // 连续 stream 请求从第二次起返回 HTTP 200 但空流（0 个 text_delta，无 [DONE] 异常）。
+    // 检测到空流且无工具调用 → 用非流式 complete() 兜底重试一次，保证用户拿到回复。
+    if (textDeltaCount === 0 && toolCalls.length === 0) {
+      try {
+        const fb = await this.complete(messages, opts);
+        if (fb.content) yield { type: 'text_delta', delta: fb.content };
+        if (fb.toolCalls?.length) yield { type: 'tool_calls', toolCalls: fb.toolCalls };
+      } catch {
+        /* 兜底也失败则保持空（引擎会以空内容结束本轮） */
+      }
     }
     } finally {
       if (idleTimer) clearTimeout(idleTimer);

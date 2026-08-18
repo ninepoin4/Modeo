@@ -248,7 +248,11 @@ export default function App() {
         setStreaming(false);
         setPendingApproval(null);
         setPendingQuestion(null);
-        setMessages((prev) => [...prev, { role: 'assistant', content: `错误：${evt.message}`, id: uid() }]);
+        // 2026-08-18：先移除空占位气泡（"回复中"），再追加错误消息，避免留下空气泡
+        setMessages((prev) => [
+          ...prev.filter((m) => !(m.pending && !m.content)),
+          { role: 'assistant', content: `错误：${evt.message}`, id: uid() },
+        ]);
       }
     },
     [session?.id, refreshSessions]
@@ -266,6 +270,8 @@ export default function App() {
       sendingRef.current = true;
       setStreaming(true);
       setMessages((prev) => [...prev, { role: 'user', content, id: uid() }]);
+      // 2026-08-18：立即显示"回复中"占位气泡——真实模型首 token 常需数秒，无占位用户以为卡死
+      setMessages((prev) => [...prev, { role: 'assistant', content: '', streaming: true, pending: true, id: uid() }]);
       const controller = new AbortController();
       abortRef.current = controller;
       try {

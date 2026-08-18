@@ -1,0 +1,4 @@
+{"ts":"2026-08-18T03:03:29.631Z","type":"user_message","messageId":"825425aa-1cbf-4bbd-88ca-299d9de8d6e6","content":"ping"}
+{"ts":"2026-08-18T03:03:33.757Z","type":"tool_call","toolCall":{"id":"call_580a426865e142f4bb37e345","name":"ping","args":{"echo":"hello"}}}
+{"ts":"2026-08-18T03:03:33.758Z","type":"tool_result","toolCall":{"id":"call_580a426865e142f4bb37e345","name":"ping","args":{"echo":"hello"}},"result":{"output":"pong 2026-08-18T03:03:33.757Z | echo: hello","isError":false}}
+{"ts":"2026-08-18T03:03:38.733Z","type":"done","messageId":"a9d1c125-4146-4b0b-9e04-432605080d24"}

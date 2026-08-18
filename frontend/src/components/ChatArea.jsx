@@ -63,6 +63,21 @@ function Bubble({ m, streaming, delay }) {
     );
   }
   const isUser = m.role === 'user';
+  // 2026-08-18："回复中"占位——模型首 token 前展示打字动画提示，避免用户误以为卡死
+  if (m.pending && !m.content && !isUser) {
+    return (
+      <div className="flex justify-start py-1">
+        <div className="flex items-center gap-2 rounded-2xl border border-line bg-card px-4 py-2.5 shadow-paper">
+          <span className="flex gap-1">
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted" style={{ animationDelay: '0ms' }} />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted" style={{ animationDelay: '120ms' }} />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted" style={{ animationDelay: '240ms' }} />
+          </span>
+          <span className="text-xs text-muted">回复中…</span>
+        </div>
+      </div>
+    );
+  }
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(m.content || '');
