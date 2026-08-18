@@ -8,6 +8,7 @@ import { createRunTestsTool } from './runTestsTool.js';
 import { createReviewChangesTool } from './reviewChangesTool.js';
 import { createAgentTools } from './agentTools.js';
 import { createAskUserTool } from './askUserTool.js';
+import { createSearchTools } from './searchTools.js';
 
 export function createToolRegistry(toolDefs) {
   const map = new Map();
@@ -32,6 +33,7 @@ export function createCodeTools(workspaceRoot) {
   const shellTool = createShellTool(workspaceRoot);
   const runTests = createRunTestsTool(workspaceRoot, shellTool);
   const reviewChanges = createReviewChangesTool();
+  const searchTools = createSearchTools(workspaceRoot);
   const defs = [
     fileTools.list_dir,
     fileTools.read_file,
@@ -40,6 +42,10 @@ export function createCodeTools(workspaceRoot) {
     shellTool,
     runTests,
     reviewChanges,
+    // 2026-08-18 检索类工具（参考主流 agent 工具面补足开发高频能力）
+    searchTools.glob,
+    searchTools.grep,
+    searchTools.web_fetch,
   ];
   return createToolRegistry(defs);
 }

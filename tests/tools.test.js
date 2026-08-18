@@ -98,17 +98,67 @@ test('shell: 超时返回 isError', async () => {
   assert.match(r.output, /超时/);
 });
 
-test('registry: createCodeTools 提供五个工具与描述', () => {
+test('registry: createCodeTools 提供工具与描述（2026-08-18 含检索类）', () => {
   const reg = createCodeTools(root);
   assert.deepEqual(reg.list().sort(), [
     'edit_file',
+    'glob',
+    'grep',
     'list_dir',
     'read_file',
     'review_changes',
     'run_tests',
     'shell',
+    'web_fetch',
     'write_file',
   ]);
   const desc = reg.descriptions();
   assert.ok(desc.every((d) => d.name && d.description));
+});
+
+// 2026-08-18 检索类工具
+test('search: glob 匹配工作区文件（* ? **）', async () => {
+  const { createSearchTools } = await import('../src/tools/searchTools.js');
+  const t = createSearchTools(root);
+  fs.mkdirSync(path.join(root, 'src', 'deep'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'index.js'), 'x');
+  fs.writeFileSync(path.join(root, 'src', 'app.js'), 'x');
+  fs.writeFileSync(path.join(root, 'src', 'deep', 'util.js'), 'x');
+  const g1 = await t.glob.execute({ pattern: '**/*.js' });
+  const names = g1.output.split('\n').map((s) => s.split('/').pop()).sort();
+  assert.deepEqual(names, ['app.js', 'index.js', 'util.js']);
+  const g2 = await t.glob.execute({ pattern: 'src/*.js' });
+  assert.ok(g2.output.includes('app.js') && !g2.output.includes('deep'), '单层 * 不跨目录');
+  const g3 = await t.glob.execute({ pattern: '**/*.js', path: '..' });
+  assert.equal(g3.isError, true, '沙箱越界应拒绝');
+});
+
+test('search: grep 内容搜索（正则/大小写/跳过构建产物）', async () => {
+  const { createSearchTools } = await import('../src/tools/searchTools.js');
+  const t = createSearchTools(root);
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src', 'app.js'), '// TODO: fix me\nconst x = 1;\n');
+  fs.writeFileSync(path.join(root, 'node_modules', 'skip.js'), '// TODO: should be skipped\n');
+  fs.writeFileSync(path.join(root, 'src', 'App.tsx'), 'const App = () => <div>hi</div>;\n');
+  const r1 = await t.grep.execute({ pattern: 'TODO' });
+  assert.ok(r1.output.includes('app.js'), '应命中 src/app.js');
+  assert.ok(!r1.output.includes('node_modules'), '应跳过 node_modules');
+  const r2 = await t.grep.execute({ pattern: 'TODO', path: 'src' });
+  assert.ok(r2.output.includes('app.js'));
+  const r3 = await t.grep.execute({ pattern: '[' });
+  assert.equal(r3.isError, true, '非法正则应报错');
+  const r4 = await t.grep.execute({ pattern: 'APP', caseSensitive: true });
+  assert.ok(!r4.output.includes('app.js'), '大小写敏感不应命中小写 app');
+});
+
+test('search: web_fetch 协议白名单与失败处理', async () => {
+  const { createSearchTools } = await import('../src/tools/searchTools.js');
+  const t = createSearchTools(root);
+  const w1 = await t.web_fetch.execute({ url: 'file:///etc/passwd' });
+  assert.equal(w1.isError, true, 'file:// 应拒绝');
+  const w2 = await t.web_fetch.execute({ url: 'javascript:alert(1)' });
+  assert.equal(w2.isError, true, 'javascript: 应拒绝');
+  const w3 = await t.web_fetch.execute({ url: 'http://127.0.0.1:1/nope' });
+  assert.equal(w3.isError, true, '连不上的地址应报错');
 });
