@@ -163,7 +163,13 @@ export default function SettingsDialog({
       const r = await api.saveSettings(payload);
       onSave(r.settings);
       const act = r.settings.providers?.find((p) => p.id === r.settings.activeProviderId);
-      toast(`设置已保存（当前厂商：${act?.name || '未配置'}）`, 'success');
+      const wsChanged = draft.workspaceDir !== settings?.workspaceDir;
+      toast(
+        wsChanged
+          ? `设置已保存（当前厂商：${act?.name || '未配置'}）· 工作区目录已更新，重启 Modeo 后生效`
+          : `设置已保存（当前厂商：${act?.name || '未配置'}）`,
+        'success'
+      );
       onClose();
     } catch (e) {
       setError(e.message);
@@ -435,6 +441,18 @@ export default function SettingsDialog({
                 <Input value={draft.marketUrl || ''} onChange={(e) => set('marketUrl', e.target.value)} placeholder="https://example.com/market.json" />
               </label>
             </div>
+            {/* 2026-08-18：工作区目录可配置——沙箱边界即工作区，指向项目根即可让 AI review/开发项目本身 */}
+            <label className="mt-3 block">
+              <span className="mb-1 block text-xs text-muted">工作区目录（沙箱边界，AI 只能访问这里）</span>
+              <Input
+                value={draft.workspaceDir || ''}
+                onChange={(e) => set('workspaceDir', e.target.value)}
+                placeholder="留空 = 默认 workspaces/default；填项目根目录路径（如 D:\my-project）"
+              />
+              <span className="mt-1 block text-[11px] text-muted/80">
+                建议指向你的项目根目录（如 Modeo 自身源码目录），AI 即可读取/修改项目文件；危险命令仍需审批。保存后需重启 Modeo 生效。
+              </span>
+            </label>
           </div>
 
           <Separator />

@@ -40,9 +40,26 @@ const PUBLIC_DIR = fs.existsSync(WEB_DIR) ? WEB_DIR : path.join(ROOT, 'public');
 const DATA_DIR = process.env.MODEO_DATA_DIR ? path.resolve(process.env.MODEO_DATA_DIR) : path.join(ROOT, 'data');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+
+/** 从 settings.json 读取用户配置的工作区目录（有效目录才采用） */
+function configuredWorkspaceDir() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    if (typeof raw.workspaceDir === 'string' && raw.workspaceDir.trim()) {
+      const p = path.resolve(raw.workspaceDir.trim());
+      if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p;
+    }
+  } catch {
+    /* 无文件/损坏 → 默认 */
+  }
+  return null;
+}
+
+// 2026-08-18：工作区可配置（设置页「工作区目录」）——优先级：环境变量 > 设置 > 默认 workspaces/default。
+// 让 Modeo 工作区直接指向用户项目根（如 review/开发本项目），沙箱边界即项目目录。
 const WORKSPACE_ROOT = process.env.MODEO_WORKSPACE_DIR
   ? path.resolve(process.env.MODEO_WORKSPACE_DIR)
-  : path.join(ROOT, 'workspaces', 'default');
+  : (configuredWorkspaceDir() || path.join(ROOT, 'workspaces', 'default'));
 const USER_HARNESS_DIR = path.join(DATA_DIR, 'harness');
 const PORT = Number(process.env.MODEO_PORT || 8787);
 // 工具执行管道钩子（P0-2）：默认注册审计后置钩子，每次工具执行落 data/audit.log
@@ -97,6 +114,7 @@ const DEFAULT_SETTINGS = {
   theme: 'paper',
   activeProviderId: 'mock',
   providers: [],
+  workspaceDir: '',
 };
 
 /**
