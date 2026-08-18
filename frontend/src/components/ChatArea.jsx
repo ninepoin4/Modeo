@@ -9,6 +9,7 @@ import { cn } from '../lib/utils';
 import { api } from '../api';
 import Markdown from './Markdown';
 import VirtualMessageList from './VirtualMessageList';
+import { GenuiHostProvider } from '../genui/GenuiHost.jsx';
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']);
@@ -280,8 +281,20 @@ export default function ChatArea({ session, messages, streaming, characterName, 
     setEditingModel(false);
   };
 
+  // GenUI action 回环（2026-08-18）：组件点击 → [genui-action] 消息 → 模型用 dsh-ui 更新界面
+  const genuiSendAction = useCallback(
+    (action, payload) => {
+      const payloadText = payload && Object.keys(payload).length > 0 ? ` 组件数据: ${JSON.stringify(payload)}` : '';
+      onSend(
+        `[genui-action] ${action}。用户刚刚在界面中触发了动作 "${action}"，请根据组件数据执行相应操作，并用 dsh-ui 围栏输出更新后的界面（只输出更新部分，正文至多一行 10 字以内确认）。${payloadText}`
+      );
+    },
+    [onSend]
+  );
+
   return (
-    <section className="flex min-w-0 flex-1 flex-col bg-transparent">
+    <GenuiHostProvider sessionId={session?.id} sendAction={genuiSendAction}>
+      <section className="flex min-w-0 flex-1 flex-col bg-transparent">
       <header className="flex items-center justify-between border-b border-line px-6 py-3.5">
         <div className="flex items-baseline gap-3">
           <span className="font-serif-display text-lg text-ink">{name}</span>
@@ -572,6 +585,7 @@ export default function ChatArea({ session, messages, streaming, characterName, 
           )}
         </div>
       </footer>
-    </section>
+      </section>
+    </GenuiHostProvider>
   );
 }

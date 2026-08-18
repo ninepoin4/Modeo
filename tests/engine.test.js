@@ -68,7 +68,10 @@ test('engine: code 模式注入工作区 AGENTS.md 约定', () => {
   assert.match(prompt, /TypeScript/);
   assert.match(prompt, /不可信内容/, 'AGENTS.md 应标注为不可信内容（防提示词注入）');
   const chat = harnesses.find((h) => h.id === 'chat');
-  assert.equal(assembleSystemPrompt(chat, null, wsRoot), null);
+  // 2026-08-18：GenUI 提示词始终注入，prompt 不再可能为 null；改测"chat 模式不注入 AGENTS.md"
+  const chatPrompt = assembleSystemPrompt(chat, null, wsRoot);
+  assert.notEqual(chatPrompt, null, 'GenUI 提示词使 chat 模式 prompt 非空');
+  assert.ok(!chatPrompt.includes('AGENTS.md'), 'chat 模式不应注入 AGENTS.md');
   fs.unlinkSync(path.join(wsRoot, 'AGENTS.md'));
 });
 
@@ -210,7 +213,10 @@ test('engine: 会话目标注入系统提示词（chat 模式同样生效且可�
   const code = harnesses.find((h) => h.id === 'code');
   const p2 = assembleSystemPrompt(code, null, wsRoot, { goal: '重构模块' });
   assert.match(p2, /重构模块/);
-  assert.equal(assembleSystemPrompt(chat, null, wsRoot, { goal: '' }), null);
+  // 2026-08-18：GenUI 提示词始终注入，prompt 不再可能为 null；改测"空 goal 时不注入【会话目标】"
+  const chatNoGoal = assembleSystemPrompt(chat, null, wsRoot, { goal: '' });
+  assert.notEqual(chatNoGoal, null, 'GenUI 提示词使 chat 模式 prompt 非空');
+  assert.ok(!chatNoGoal.includes('【会话目标】'), '空 goal 时不应注入会话目标块');
 });
 
 test('engine: notice 消息不会发给模型', async () => {

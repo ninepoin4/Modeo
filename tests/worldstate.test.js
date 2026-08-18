@@ -66,7 +66,10 @@ test('worldstate: 注入系统提示词（roleplay），不影响 chat/code', ()
   assert.match(p, /世界状态记忆/);
   assert.match(p, /黄昏/);
   assert.match(p, /长安/);
-  assert.equal(assembleSystemPrompt(chat, null, null, session), null);
+  // 2026-08-18：GenUI 提示词始终注入，prompt 不再可能为 null；改测"chat 模式不注入 worldState"
+  const chatP = assembleSystemPrompt(chat, null, null, session);
+  assert.notEqual(chatP, null, 'GenUI 提示词使 chat 模式 prompt 非空');
+  assert.ok(!chatP.includes('世界状态记忆'), 'chat 模式不应注入 worldState');
   const codeP = assembleSystemPrompt(code, null, wsRoot, session);
   assert.ok(!codeP.includes('世界状态记忆'));
 });

@@ -80,8 +80,17 @@ export function assembleSystemPrompt(harness, character, workspaceRoot, session 
     const goalBlock = `【会话目标】\n${session.goal.trim()}`;
     sys = sys ? `${sys}\n\n${goalBlock}` : goalBlock;
   }
+  // GenUI 交互界面能力（2026-08-18，dsh-genui 原生嵌入）：模型输出 ```dsh-ui 围栏，
+  // 客户端渲染为真实交互组件。对所有 harness 生效（渲染在聊天区通用）。
+  sys = sys ? `${sys}\n\n${GENUI_PROMPT}` : GENUI_PROMPT;
   return sys || null;
 }
+
+/** GenUI 能力声明（精简自 omdsh-dev/dsh-genui SKILL.md，MIT）。 */
+const GENUI_PROMPT = `【GenUI 交互界面】你可以在回答正文中直接输出交互式 UI 组件：用 \`\`\`dsh-ui 围栏包裹 JSON 规格，客户端会把围栏渲染成真实可交互的组件（卡片/图表/表格/表单/测验等），文字照常穿插在前后。组件就是回答的一部分，不是工具调用。
+格式：{"title":"可选标题","items":[{"type":"组件","...":"参数"}, ...]}
+允许的 type：布局 text/row/col/grid/card/divider/spacer；展示 stat/badge/progress/list/table/keyvalue/avatar/timeline/file-tree/breadcrumb/diff/json/code/callout/steps；图表 chart(bars/line/donut)/plot(函数图)；交互 button/input/select/checkbox/radio/switch/textarea/tabs/accordion/copy；高级 mermaid/scene3d/quiz。
+规则：①要点/对比/流程/步骤/状态/数据展示时，用组件比纯文字更清晰就输出（无需用户要求）②交互组件必须带 action 属性，不带 action 的按钮会渲染成禁用态；用户点击带 action 的组件后事件会以 [genui-action] 发回给你，你再输出 dsh-ui 围栏更新界面（只输出变化部分，正文至多一行 10 字确认）③本地零往返：判题/排序/展开/折叠/重置由客户端本地完成，不要为这些发 action ④禁止索取或生成密码、API Key、访问令牌等秘密输入⑤JSON 必须合法：不要注释、尾逗号、换行内字符串；整个围栏节点上限 200 个、嵌套最多 8 层。`;
 
 /**
  * 会话消息 → provider 视角（OpenAI 兼容格式），实现见 types.js cleanForProvider。

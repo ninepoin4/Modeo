@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, Copy, X } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { GenuiFence } from '../genui/GenuiHost.jsx';
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -106,7 +107,7 @@ export default function Markdown({ content }) {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    const fence = line.match(/^```(\w*)\s*$/);
+    const fence = line.match(/^```([\w-]*)\s*$/);
     if (fence) {
       const lang = fence[1];
       const buf = [];
@@ -171,6 +172,8 @@ export default function Markdown({ content }) {
   return (
     <div className="space-y-1" onClick={handleClick}>
       {blocks.map((b, idx) => {
+        // 2026-08-18：GenUI 原生嵌入——模型输出的 ```dsh-ui 围栏渲染为交互组件
+        if (b.type === 'code' && b.lang === 'dsh-ui') return <GenuiFence key={idx} raw={b.code} />;
         if (b.type === 'code') return <CodeBlock key={idx} code={b.code} lang={b.lang} />;
         if (b.type === 'quote')
           return (
