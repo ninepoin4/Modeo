@@ -256,11 +256,18 @@ export default function App() {
             setMessages((prev) => {
               // 2026-08-18：思维链不持久化在服务端——快照替换前把最后一条 assistant 的 thinking 补回
               const lastThink = [...prev].reverse().find((m) => m.role === 'assistant' && m.thinking)?.thinking;
-              const base = (r.session.messages || []).filter((m) => m.role !== 'tool');
-              if (lastThink && base.length && base[base.length - 1].role === 'assistant') {
-                base[base.length - 1] = { ...base[base.length - 1], thinking: lastThink };
-              }
-              return base;
+              const snap = (r.session.messages || []).filter((m) => m.role !== 'tool');
+              // 2026-08-18 修复"流式完成后闪一下"：快照消息 id 是服务端 randomUUID，
+              // 直接整组替换会让虚拟列表 key 全变 → 全部卸载重挂载 → 入场动画重播闪烁。
+              // 按索引合并：content 以快照为准（权威/完整），id 与 thinking 保留前端值 → key 稳定零闪动。
+              return snap.map((sm, i) => {
+                const pm = prev[i];
+                return {
+                  ...sm,
+                  id: pm?.id || sm.id,
+                  thinking: pm?.thinking || (i === snap.length - 1 ? lastThink : undefined),
+                };
+              });
             });
           });
           refreshSessions();
