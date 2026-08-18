@@ -12,6 +12,7 @@ import { loadHarnessConfigs, loadUserHarnessConfigs } from './src/core/harness.j
 import { MODE_IDS, MODE_ID_PATTERN, applyHarnessDefaults, validateHarnessShape } from './src/core/types.js';
 import { parseYaml, stringifyYaml } from './src/core/yaml.js';
 import { createProvider } from './src/core/provider.js';
+import { netFetch } from './src/core/net.js';
 import * as sessionStore from './src/core/session.js';
 import * as approvalsMgr from './src/core/approvals.js';
 import { runAgentTurn, assembleSystemPrompt } from './src/runtime/engine.js';
@@ -94,14 +95,68 @@ const DEFAULT_SETTINGS = {
   model: 'gpt-4o-mini',
   temperature: 0.7,
   theme: 'paper',
+  activeProviderId: 'mock',
+  providers: [],
 };
 
-function loadSettings() {
-  try {
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
-  } catch {
-    return { ...DEFAULT_SETTINGS };
+/**
+ * 多厂商规范化（2026-08-18）：确保 settings 里总有 providers 数组（含不可删的 mock 内置项）、
+ * activeProviderId 有效，并把激活厂商投影到顶层 provider/baseUrl/apiKey/model——
+ * 让 createProvider() 与所有读顶层字段的代码无需改动。
+ */
+function ensureProviders(s) {
+  let providers = Array.isArray(s.providers) ? s.providers : [];
+  providers = providers.map((p) => ({
+    ...p,
+    id: p.id || randomUUID(),
+    provider: p.provider === 'mock' ? 'mock' : (p.provider || 'openai'),
+    baseUrl: p.baseUrl || '',
+    apiKey: p.apiKey || '',
+    model: p.model || '',
+    models: Array.isArray(p.models) ? p.models : [],
+  }));
+  if (providers.length === 0) {
+    providers = [{ id: 'mock', name: 'Mock（离线演示）', provider: 'mock', baseUrl: '', apiKey: '', model: 'mock', models: [] }];
   }
+  if (!providers.some((p) => p.provider === 'mock')) {
+    providers.unshift({ id: 'mock', name: 'Mock（离线演示）', provider: 'mock', baseUrl: '', apiKey: '', model: 'mock', models: [] });
+  }
+  const activeId = s.activeProviderId && providers.some((p) => p.id === s.activeProviderId)
+    ? s.activeProviderId
+    : (providers.find((p) => p.provider !== 'mock')?.id || 'mock');
+  const active = providers.find((p) => p.id === activeId) || providers[0];
+  return {
+    ...s,
+    providers,
+    activeProviderId: active.id,
+    // 投影激活厂商（兼容旧读取路径）
+    provider: active.provider === 'mock' ? 'mock' : (active.provider || 'openai'),
+    baseUrl: active.baseUrl || '',
+    apiKey: active.apiKey || '',
+    model: active.model || active.models?.[0] || 'gpt-4o-mini',
+  };
+}
+
+function loadSettings() {
+  let raw = null;
+  try {
+    raw = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  } catch {
+    /* 无文件或损坏：走默认 */
+  }
+  const base = { ...DEFAULT_SETTINGS };
+  if (raw && typeof raw === 'object') {
+    // 旧格式（无 providers）迁移：顶层有真实厂商配置则升格为厂商 1 并激活它
+    if (!Array.isArray(raw.providers) || raw.providers.length === 0) {
+      if (raw.baseUrl || raw.apiKey || (raw.model && raw.model !== 'gpt-4o-mini')) {
+        const migratedId = randomUUID();
+        raw.providers = [{ id: migratedId, name: 'OpenAI 兼容', provider: 'openai', baseUrl: raw.baseUrl || '', apiKey: raw.apiKey || '', model: raw.model || '', models: [] }];
+        raw.activeProviderId = migratedId;
+      }
+    }
+    return ensureProviders({ ...base, ...raw });
+  }
+  return ensureProviders(base);
 }
 
 function saveSettings(s) {
@@ -110,12 +165,19 @@ function saveSettings(s) {
 }
 
 /**
- * 对外脱敏：apiKey 不回传明文，改为 apiKeySet 布尔。
- * 前端保存时 apiKey 传空字符串表示未修改，服务端保留原值。
+ * 对外脱敏：apiKey 不回传明文，改为 apiKeySet 布尔（顶层与每个厂商条目都脱敏）。
+ * 前端保存时 apiKey 传空字符串表示未修改，null 表示清除，服务端保留/清除原值。
  */
 function publicSettings(s) {
-  const { apiKey, ...rest } = s;
-  return { ...rest, apiKeySet: Boolean(apiKey) };
+  const { apiKey, providers, ...rest } = s;
+  return {
+    ...rest,
+    apiKeySet: Boolean(apiKey),
+    providers: (providers || []).map((p) => {
+      const { apiKey: k, ...restP } = p;
+      return { ...restP, apiKeySet: Boolean(k) };
+    }),
+  };
 }
 
 function publicMode(h) {
@@ -1150,17 +1212,80 @@ const server = http.createServer(async (req, res) => {
     }
     if (method === 'POST' && p === '/api/settings') {
       const body = await readJson(req);
-      const settings = { ...loadSettings(), ...body };
-      // apiKey 为空字符串表示"未修改"：保留原值（前端脱敏后不回传密钥）
-      if (body.apiKey === '' && loadSettings().apiKey) {
-        settings.apiKey = loadSettings().apiKey;
+      const prev = loadSettings();
+      const settings = { ...prev, ...body };
+      if (Array.isArray(body.providers)) {
+        // 多厂商模式：规范化每个厂商条目（apiKey 空串=未修改保留 / null=清除）
+        const providers = body.providers.map((np) => {
+          const old = prev.providers.find((op) => op.id === np.id);
+          // apiKey：undefined/''（脱敏客户端未带或留空）= 保留原值；null = 清除；其他 = 新值
+          let apiKey = np.apiKey;
+          if (apiKey === undefined || apiKey === '') apiKey = old ? old.apiKey : '';
+          else if (apiKey === null) apiKey = '';
+          return {
+            ...np,
+            id: np.id || randomUUID(),
+            apiKey,
+            models: Array.isArray(np.models) ? np.models : (old?.models || []),
+          };
+        });
+        // mock 内置厂商恒存在（即使前端误删）
+        if (!providers.some((p) => p.provider === 'mock')) {
+          providers.unshift({ id: 'mock', name: 'Mock（离线演示）', provider: 'mock', baseUrl: '', apiKey: '', model: 'mock', models: [] });
+        }
+        settings.providers = providers;
+        settings.activeProviderId =
+          body.activeProviderId && providers.some((p) => p.id === body.activeProviderId) ? body.activeProviderId : providers[0].id;
+        const active = providers.find((p) => p.id === settings.activeProviderId);
+        settings.provider = active.provider === 'mock' ? 'mock' : (active.provider || 'openai');
+        settings.baseUrl = active.baseUrl || '';
+        settings.apiKey = active.apiKey || '';
+        settings.model = active.model || active.models?.[0] || 'gpt-4o-mini';
+      } else {
+        // 旧单厂商模式兼容：apiKey 空串保留 / null 清除 / 其他更新——均落到激活厂商条目
+        // （顶层 apiKey 是投影只读，直接写会被 ensureProviders 覆盖）
+        const activeIdx = settings.providers.findIndex((p) => p.id === settings.activeProviderId);
+        if (body.apiKey === null && activeIdx >= 0) settings.providers[activeIdx].apiKey = '';
+        else if (body.apiKey && activeIdx >= 0) settings.providers[activeIdx].apiKey = body.apiKey;
       }
-      // 2026-08-17 审查修复：apiKey === null 显式清除（此前密钥一旦设置永久无法删除）
-      if (body.apiKey === null) {
-        settings.apiKey = '';
+      const normalized = ensureProviders(settings);
+      saveSettings(normalized);
+      return sendJson(res, 200, { settings: publicSettings(normalized) });
+    }
+    if (method === 'POST' && p === '/api/providers/fetch-models') {
+      const body = await readJson(req);
+      const baseUrl = String(body.baseUrl || '')
+        .trim()
+        .replace(/\/+$/, '')
+        .replace(/\/chat\/completions$/i, '');
+      if (!/^https?:\/\//i.test(baseUrl)) {
+        return sendJson(res, 400, { error: 'Base URL 需以 http(s):// 开头' });
       }
-      saveSettings(settings);
-      return sendJson(res, 200, { settings: publicSettings(settings) });
+      const apiKey = body.apiKey || '';
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      try {
+        const r = await netFetch(`${baseUrl}/models`, {
+          method: 'GET',
+          headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+          signal: controller.signal,
+        });
+        const text = await r.text();
+        let j;
+        try {
+          j = JSON.parse(text);
+        } catch {
+          return sendJson(res, 502, { error: `模型列表响应不是 JSON（HTTP ${r.status}）` });
+        }
+        // OpenAI 兼容格式：{data:[{id}]}；兼容 {models:[...]} / 纯数组
+        const raw = Array.isArray(j.data) ? j.data : Array.isArray(j.models) ? j.models : Array.isArray(j) ? j : [];
+        const models = raw.map((m) => (typeof m === 'string' ? m : m && m.id)).filter(Boolean).map(String);
+        return sendJson(res, 200, { models: [...new Set(models)] });
+      } catch (err) {
+        return sendJson(res, 502, { error: `获取模型列表失败: ${err.message || String(err)}` });
+      } finally {
+        clearTimeout(timer);
+      }
     }
     if (method === 'GET' && p === '/api/themes') {
       return sendJson(res, 200, { themes: listThemes() });

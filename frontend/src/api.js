@@ -74,6 +74,7 @@ export const api = {
   skipQuestion: (id) => request(`/api/sessions/${id}/answer-question`, { method: 'POST', body: { skipped: true } }),
   settings: () => request('/api/settings'),
   saveSettings: (settings) => request('/api/settings', { method: 'POST', body: settings }),
+  fetchModels: (baseUrl, apiKey) => request('/api/providers/fetch-models', { method: 'POST', body: { baseUrl, apiKey } }),
   themes: () => request('/api/themes'),
   saveTheme: (theme) => request('/api/themes', { method: 'POST', body: theme }),
   deleteTheme: (id) => request(`/api/themes/${encodeURIComponent(id)}`, { method: 'DELETE' }),

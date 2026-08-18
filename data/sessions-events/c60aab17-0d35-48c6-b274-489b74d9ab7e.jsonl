@@ -1,0 +1,24 @@
+{"ts":"2026-08-18T01:29:01.641Z","type":"user_message","messageId":"f6556a87-3121-4645-ab7d-9706d5130352","content":"你好"}
+{"ts":"2026-08-18T01:29:01.643Z","type":"done","messageId":"144cf775-2617-4a2f-82cb-02f9ffa8b099"}
+{"ts":"2026-08-18T01:29:01.689Z","type":"user_message","messageId":"5f3c120a-f3cd-4d07-b395-4e18044d4034","content":"list files"}
+{"ts":"2026-08-18T01:29:01.691Z","type":"tool_call","toolCall":{"id":"mock-1","name":"list_dir","args":{"path":"."}}}
+{"ts":"2026-08-18T01:29:01.692Z","type":"tool_result","toolCall":{"id":"mock-1","name":"list_dir","args":{"path":"."}},"result":{"output":"[file] .gitkeep","isError":false}}
+{"ts":"2026-08-18T01:29:01.694Z","type":"done","messageId":"2d9abe9d-cfb4-4d04-96e2-e60d3e814fc1"}
+{"ts":"2026-08-18T01:29:01.698Z","type":"user_message","messageId":"99f06f72-b22a-4d15-8d83-70e419be7e4c","content":"write file"}
+{"ts":"2026-08-18T01:29:01.699Z","type":"tool_call","toolCall":{"id":"mock-2","name":"write_file","args":{"path":"demo.txt","content":"hello"}}}
+{"ts":"2026-08-18T01:29:01.701Z","type":"checkpoint","checkpoint":{"id":"1787016541699-f9d8517b","label":"write_file {\"path\":\"demo.txt\",\"content\":\"hello\"}","createdAt":"2026-08-18T01:29:01.701Z"}}
+{"ts":"2026-08-18T01:29:01.704Z","type":"tool_result","toolCall":{"id":"mock-2","name":"write_file","args":{"path":"demo.txt","content":"hello"}},"result":{"output":"已写入 demo.txt（5 字节）","isError":false}}
+{"ts":"2026-08-18T01:29:01.705Z","type":"done","messageId":"c83cca30-188b-4cda-9aa9-96d9b5abb675"}
+{"ts":"2026-08-18T01:29:01.712Z","type":"user_message","messageId":"d169d9fb-cd3f-4f04-aba8-a3ef30ff8ff9","content":"run tests"}
+{"ts":"2026-08-18T01:29:01.713Z","type":"tool_call","toolCall":{"id":"mock-3","name":"run_tests","args":{}}}
+{"ts":"2026-08-18T01:29:01.944Z","type":"tool_result","toolCall":{"id":"mock-3","name":"run_tests","args":{}},"result":{"output":"测试命令：node --test（tests/*.test.js）\nTAP version 13\n# Subtest: smoke-ok\nok 1 - smoke-ok\n  ---\n  duration_ms: 0.5534\n  type: 'test'\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 117.0729\n","isError":false,"needsApproval":false}}
+{"ts":"2026-08-18T01:29:01.945Z","type":"done","messageId":"bca610ed-608a-4ee4-85c8-5d35cc42dacc"}
+{"ts":"2026-08-18T01:29:01.948Z","type":"user_message","messageId":"6b67eef1-90a8-4568-b7bc-996b2c4683d1","content":"write file"}
+{"ts":"2026-08-18T01:29:01.949Z","type":"tool_call","toolCall":{"id":"mock-2","name":"write_file","args":{"path":"demo.txt","content":"hello"}}}
+{"ts":"2026-08-18T01:29:01.951Z","type":"checkpoint","checkpoint":{"id":"1787016541950-f583a1b1","label":"write_file {\"path\":\"demo.txt\",\"content\":\"hello\"}","createdAt":"2026-08-18T01:29:01.951Z"}}
+{"ts":"2026-08-18T01:29:01.953Z","type":"tool_result","toolCall":{"id":"mock-2","name":"write_file","args":{"path":"demo.txt","content":"hello"}},"result":{"output":"已写入 demo.txt（5 字节）","isError":false}}
+{"ts":"2026-08-18T01:29:01.954Z","type":"done","messageId":"919dc1f2-d8a5-43bb-9c52-19ede4c1a451"}
+{"ts":"2026-08-18T01:29:01.957Z","type":"user_message","messageId":"5254adca-e386-473e-8bdc-974cd3b6dd82","content":"review changes"}
+{"ts":"2026-08-18T01:29:01.958Z","type":"tool_call","toolCall":{"id":"mock-4","name":"review_changes","args":{}}}
+{"ts":"2026-08-18T01:29:01.960Z","type":"tool_result","toolCall":{"id":"mock-4","name":"review_changes","args":{}},"result":{"output":"变更审查（相对最近快照）：新增 1，修改 0，删除 1；+1 / -4 行\n\n--- a/.meta.json\n+++ b/.meta.json\n-{\n-  \"label\": \"write_file {\\\"path\\\":\\\"demo.txt\\\",\\\"content\\\":\\\"hello\\\"}\",\n-  \"createdAt\": \"2026-08-18T01:29:01.951Z\"\n-}\n--- a/demo.txt\n+++ b/demo.txt\n+hello","isError":false}}
+{"ts":"2026-08-18T01:29:01.961Z","type":"done","messageId":"ffd65980-23ac-4591-b73a-f839561024fb"}

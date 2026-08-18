@@ -88,6 +88,9 @@ export default function SettingsDialog({
   const [skinDataUrl, setSkinDataUrl] = useState('');
   const [skinName, setSkinName] = useState('');
   const [skinBusy, setSkinBusy] = useState(false);
+  // 多厂商（2026-08-18）：每个厂商的 apiKey 输入临时值（'' = 未修改保留 / null = 清除）；脱敏后无明文，输入框单独管理
+  const [keyInputs, setKeyInputs] = useState({});
+  const [modelsBusy, setModelsBusy] = useState(false);
 
   // 仅在弹窗挂载时初始化草稿；settings 后续变化（如主题切换）不同步，避免清空未保存编辑
   const initRef = useRef(false);
@@ -108,11 +111,49 @@ export default function SettingsDialog({
 
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
 
+  // ---- 多厂商 helpers（2026-08-18）----
+  const providers = draft.providers || [];
+  const activeProvider = providers.find((p) => p.id === draft.activeProviderId) || null;
+  const updateProvider = (id, patch) =>
+    set('providers', providers.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const addProvider = () => {
+    const np = { id: `p-${Date.now().toString(36)}`, name: '新厂商', provider: 'openai', baseUrl: '', apiKeySet: false, model: '', models: [] };
+    set('providers', [...providers, np]);
+    set('activeProviderId', np.id);
+  };
+  const removeProvider = (id) => {
+    const rest = providers.filter((p) => p.id !== id);
+    set('providers', rest);
+    if (draft.activeProviderId === id) set('activeProviderId', rest[0]?.id || 'mock');
+  };
+  const fetchModelsFor = async (id) => {
+    const p = providers.find((x) => x.id === id);
+    if (!p || !/^https?:\/\//i.test(p.baseUrl || '')) {
+      toast('请先填写 Base URL（以 http(s):// 开头）', 'error');
+      return;
+    }
+    setModelsBusy(true);
+    try {
+      const r = await api.fetchModels(p.baseUrl, keyInputs[id] || '');
+      updateProvider(id, { models: r.models || [], model: (r.models || [])[0] || p.model });
+      toast(`获取到 ${(r.models || []).length} 个模型`, 'success');
+    } catch (e) {
+      toast(e.message || '获取模型列表失败', 'error');
+    } finally {
+      setModelsBusy(false);
+    }
+  };
+
   const save = async () => {
     try {
-      // apiKey 未填写则传空字符串，服务端保留原值（脱敏设计）
-      // theme 用当前 themeId 覆盖：draft 是挂载时快照，弹窗内切主题后不得被旧值回滚
-      const payload = { ...draft, apiKey: draft.apiKey || '', theme: themeId };
+      // 多厂商（2026-08-18）：providers 数组整体保存；每个厂商 apiKey 由输入框临时值决定
+      // （'' = 服务端保留原值 / null = 清除）；theme 用当前 themeId 覆盖
+      const payload = {
+        ...draft,
+        providers: (draft.providers || []).map((p) => ({ ...p, apiKey: keyInputs[p.id] ?? '' })),
+        activeProviderId: draft.activeProviderId,
+        theme: themeId,
+      };
       const r = await api.saveSettings(payload);
       onSave(r.settings);
       onClose();
@@ -267,43 +308,124 @@ export default function SettingsDialog({
           <DialogTitle>设置</DialogTitle>
         </DialogHeader>
         <DialogBody className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="mb-1 block text-xs text-muted">模型提供商</span>
-              <select
-                value={draft.provider || 'mock'}
-                onChange={(e) => set('provider', e.target.value)}
-                className="h-10 w-full rounded-xl border border-line bg-card px-3 text-sm focus:border-ink/50 focus:outline-none"
-              >
-                <option value="mock">Mock（离线演示）</option>
-                <option value="openai">OpenAI 兼容 API</option>
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-muted">模型</span>
-              <Input value={draft.model || ''} onChange={(e) => set('model', e.target.value)} />
-            </label>
-            <label className="block col-span-2">
-              <span className="mb-1 block text-xs text-muted">Base URL</span>
-              <Input value={draft.baseUrl || ''} onChange={(e) => set('baseUrl', e.target.value)} />
-            </label>
-            <label className="block col-span-2">
-              <span className="mb-1 block text-xs text-muted">API Key（仅存本地{draft.apiKeySet ? ' · 已设置' : ''}）</span>
-              <Input
-                type="password"
-                placeholder={draft.apiKeySet ? '已设置，留空则保持不变' : '输入 API Key'}
-                value={draft.apiKey || ''}
-                onChange={(e) => set('apiKey', e.target.value)}
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-muted">Temperature</span>
-              <Input type="number" step="0.1" min="0" max="2" value={draft.temperature ?? 0.7} onChange={(e) => set('temperature', Number(e.target.value))} />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs text-muted">角色市场索引 URL</span>
-              <Input value={draft.marketUrl || ''} onChange={(e) => set('marketUrl', e.target.value)} placeholder="https://example.com/market.json" />
-            </label>
+          <div className="space-y-3">
+            <div>
+              <p className="mb-2 text-sm text-ink">模型厂商</p>
+              <div className="space-y-1.5">
+                {providers.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`flex items-center gap-2 rounded-xl border px-3 py-2 transition-colors ${
+                      draft.activeProviderId === p.id ? 'border-ink/40 bg-card' : 'border-line bg-card/40 hover:bg-card/60'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="activeProvider"
+                      checked={draft.activeProviderId === p.id}
+                      onChange={() => set('activeProviderId', p.id)}
+                      className="accent-ink"
+                    />
+                    <button type="button" onClick={() => set('activeProviderId', p.id)} className="min-w-0 flex-1 text-left">
+                      <span className="block truncate text-sm text-ink">{p.name || '（未命名厂商）'}</span>
+                      <span className="block truncate text-xs text-muted">
+                        {p.provider === 'mock' ? '离线演示（无网络）' : `${p.baseUrl || '未填 Base URL'}${p.model ? ` · ${p.model}` : ''}`}
+                      </span>
+                    </button>
+                    {p.provider !== 'mock' && (
+                      <Button size="sm" variant="ghost" onClick={() => removeProvider(p.id)}>删除</Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <Button size="sm" variant="outline" className="mt-2" onClick={addProvider}>+ 添加厂商</Button>
+            </div>
+
+            {activeProvider && (
+              <div className="space-y-2.5 rounded-2xl border border-line bg-card/50 p-3">
+                <p className="text-xs font-medium text-muted">
+                  {activeProvider.provider === 'mock' ? 'Mock 厂商（离线演示，无需配置）' : '编辑厂商'}
+                </p>
+                {activeProvider.provider !== 'mock' && (
+                  <>
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-muted">厂商名称</span>
+                      <Input value={activeProvider.name || ''} onChange={(e) => updateProvider(activeProvider.id, { name: e.target.value })} />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-muted">Base URL</span>
+                      <Input
+                        value={activeProvider.baseUrl || ''}
+                        onChange={(e) => updateProvider(activeProvider.id, { baseUrl: e.target.value })}
+                        placeholder="https://api.openai.com/v1"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 flex items-center justify-between text-xs text-muted">
+                        <span>API Key（仅存本地{activeProvider.apiKeySet ? ' · 已设置' : ''}）</span>
+                        {activeProvider.apiKeySet && (
+                          <button
+                            type="button"
+                            className="text-xs text-muted underline underline-offset-2 hover:text-ink"
+                            onClick={() => setKeyInputs((k) => ({ ...k, [activeProvider.id]: null }))}
+                          >
+                            {keyInputs[activeProvider.id] === null ? '将清除该密钥' : '清除密钥'}
+                          </button>
+                        )}
+                      </span>
+                      <Input
+                        type="password"
+                        placeholder={activeProvider.apiKeySet ? '已设置，留空则保持不变' : '输入 API Key'}
+                        value={keyInputs[activeProvider.id] ?? ''}
+                        onChange={(e) => setKeyInputs((k) => ({ ...k, [activeProvider.id]: e.target.value }))}
+                      />
+                    </label>
+                    <div className="flex items-end gap-2">
+                      <label className="block flex-1">
+                        <span className="mb-1 block text-xs text-muted">模型</span>
+                        {activeProvider.models?.length ? (
+                          <select
+                            value={activeProvider.model || ''}
+                            onChange={(e) => updateProvider(activeProvider.id, { model: e.target.value })}
+                            className="h-10 w-full rounded-xl border border-line bg-card px-3 text-sm focus:border-ink/50 focus:outline-none"
+                          >
+                            {activeProvider.models.map((m) => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input
+                            value={activeProvider.model || ''}
+                            onChange={(e) => updateProvider(activeProvider.id, { model: e.target.value })}
+                            placeholder="如 gpt-4o"
+                          />
+                        )}
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={modelsBusy}
+                        onClick={() => fetchModelsFor(activeProvider.id)}
+                      >
+                        {modelsBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                        {modelsBusy ? '获取中…' : '获取模型列表'}
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="mb-1 block text-xs text-muted">Temperature</span>
+                <Input type="number" step="0.1" min="0" max="2" value={draft.temperature ?? 0.7} onChange={(e) => set('temperature', Number(e.target.value))} />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-muted">角色市场索引 URL</span>
+                <Input value={draft.marketUrl || ''} onChange={(e) => set('marketUrl', e.target.value)} placeholder="https://example.com/market.json" />
+              </label>
+            </div>
           </div>
 
           <Separator />

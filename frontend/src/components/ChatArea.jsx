@@ -179,12 +179,8 @@ export default function ChatArea({ session, messages, streaming, characterName, 
   }, [messages, streaming, showBottom]);
 
   const mode = session?.modeId || 'chat';
-  const modeMeta = {
-    chat: ['普通对话', '零注入 · 无前置提示词'],
-    code: ['代码开发', '沙箱 · 工具 · 审批 · 快照'],
-    roleplay: ['角色扮演 / 写作', '角色卡 · 世界状态 · 多角色'],
-  };
-  const [name, desc] = modeMeta[mode] || [mode, '自定义模式'];
+  const modeNames = { chat: '普通对话', code: '代码开发', roleplay: '角色扮演 / 写作' };
+  const name = modeNames[mode] || mode;
 
   const slashToken = text.startsWith('/') ? text.slice(1).split(/\s+/)[0].toLowerCase() : '';
   const filteredCommands = slashToken
@@ -245,11 +241,10 @@ export default function ChatArea({ session, messages, streaming, characterName, 
   };
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col bg-paper">
+    <section className="flex min-w-0 flex-1 flex-col bg-transparent">
       <header className="flex items-center justify-between border-b border-line px-6 py-3.5">
         <div className="flex items-baseline gap-3">
           <span className="font-serif-display text-lg text-ink">{name}</span>
-          <span className="text-xs text-muted">{desc}</span>
         </div>
         <div className="flex items-center gap-3">
           {characterName && <Badge>角色 · {characterName}</Badge>}
@@ -361,7 +356,6 @@ export default function ChatArea({ session, messages, streaming, characterName, 
               className="flex h-full flex-col items-center justify-center gap-2 text-center"
             >
               <p className="font-serif-display text-3xl tracking-[0.25em] text-ink/85">欢迎使用 Modeo</p>
-              <p className="max-w-sm text-sm text-muted">在下方输入消息开始。三种模式可随时切换，提示词全程透明可见。</p>
             </motion.div>
           </div>
         ) : (
