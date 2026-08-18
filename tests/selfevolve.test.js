@@ -467,3 +467,63 @@ test('engine: 有配对的 tool 消息不被误清', async () => {
   const msgs = store.getSession(session.id).messages;
   assert.ok(msgs.some((m) => m.role === 'assistant' && m.toolCalls), '配对完整的 assistant 不应被清理');
 });
+
+test('engine: reasoning_delta 透传 SSE 且不污染正文与历史', async () => {
+  const session = makeSession('chat');
+  session.messages.push({ role: 'user', content: '想一个问题', id: 'u1' });
+  const harness = harnesses.find((h) => h.id === 'chat');
+  const provider = {
+    async *stream() {
+      yield { type: 'reasoning_delta', delta: '让我想想：第一步分析需求' };
+      yield { type: 'text_delta', delta: '答案在这里。' };
+    },
+  };
+  const events = await collectEvents({
+    session,
+    harness,
+    character: null,
+    provider,
+    toolRegistry: createCodeTools(wsRoot),
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: {},
+  });
+  const rd = events.filter((e) => e.type === 'reasoning_delta').map((e) => e.delta).join('');
+  assert.equal(rd, '让我想想：第一步分析需求', '思维链应透传为 reasoning_delta 事件');
+  const td = events.filter((e) => e.type === 'text_delta').map((e) => e.delta).join('');
+  assert.equal(td, '答案在这里。', '正文不受思维链污染');
+  const msgs = store.getSession(session.id).messages;
+  const last = msgs[msgs.length - 1];
+  assert.equal(last.role, 'assistant');
+  assert.equal(last.content, '答案在这里。', '持久化 content 不含思维链');
+  assert.ok(!('thinking' in last), '消息历史不存 thinking 字段');
+  assert.ok(!JSON.stringify(msgs).includes('让我想想'), '思维链不进会话历史');
+});
+
+test('provider: OpenAIProvider.stream 解析 reasoning_content 与 reasoning', async () => {
+  const http = (await import('node:http')).default;
+  const mock = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write('data: {"choices":[{"delta":{"reasoning_content":"先"}}]}\n\n');
+    res.write('data: {"choices":[{"delta":{"reasoning_content":"分析"}}]}\n\n');
+    res.write('data: {"choices":[{"delta":{"content":"正文"}}]}\n\n');
+    res.write('data: [DONE]\n\n');
+    res.end();
+  });
+  await new Promise((r) => mock.listen(0, '127.0.0.1', r));
+  const { OpenAIProvider } = await import('../src/core/provider.js');
+  const p = new OpenAIProvider({ baseUrl: 'http://127.0.0.1:' + mock.address().port + '/v1', apiKey: 'x', model: 'm' });
+  const types = [];
+  const texts = [];
+  const reasons = [];
+  for await (const c of p.stream([{ role: 'user', content: 'hi' }], {})) {
+    types.push(c.type);
+    if (c.type === 'text_delta') texts.push(c.delta);
+    if (c.type === 'reasoning_delta') reasons.push(c.delta);
+  }
+  assert.deepEqual(types, ['reasoning_delta', 'reasoning_delta', 'text_delta'], 'chunk 顺序: ' + JSON.stringify(types));
+  assert.equal(reasons.join(''), '先分析');
+  assert.equal(texts.join(''), '正文');
+  await new Promise((r) => mock.close(r));
+});

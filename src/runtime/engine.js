@@ -367,6 +367,10 @@ export async function runAgentTurn(opts) {
         if (chunk.type === 'text_delta') {
           content += chunk.delta || '';
           emit({ type: SSE_EVENTS.TEXT_DELTA, delta: chunk.delta || '' });
+        } else if (chunk.type === 'reasoning_delta') {
+          // 思维链（2026-08-18）：仅流式透传给前端展示（默认折叠），不写入会话历史、
+          // 不参与 content 拼接——思考内容不应回灌给模型或持久化
+          emit({ type: 'reasoning_delta', delta: chunk.delta || '' });
         } else if (chunk.type === 'tool_calls' && Array.isArray(chunk.toolCalls)) {
           toolCalls = chunk.toolCalls;
         } else if (chunk.type === 'error') {

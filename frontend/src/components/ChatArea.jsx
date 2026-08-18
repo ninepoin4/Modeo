@@ -41,6 +41,21 @@ function ToolChips({ toolCalls }) {
   );
 }
 
+/** 思维链折叠块（2026-08-18）：默认收起；summary 显示"思考过程 / 思考中…"+ 字数 */
+function ThinkingBlock({ text, streaming }) {
+  const chars = String(text || '').length;
+  return (
+    <details className="mb-2 rounded-lg border border-line/70 bg-paper2/50 px-3 py-2 text-left">
+      <summary className="cursor-pointer select-none text-xs text-muted transition-colors hover:text-ink">
+        {streaming ? `思考中…（${chars} 字）` : `思考过程（${chars} 字）`}
+      </summary>
+      <div className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-muted/90">
+        {text}
+      </div>
+    </details>
+  );
+}
+
 function Bubble({ m, streaming, delay }) {
   const [copied, setCopied] = useState(false);
   if (m.role === 'system' || m.role === 'notice') {
@@ -63,8 +78,16 @@ function Bubble({ m, streaming, delay }) {
     );
   }
   const isUser = m.role === 'user';
-  // 2026-08-18："回复中"占位——模型首 token 前展示打字动画提示，避免用户误以为卡死
+  // 2026-08-18："回复中/思考中"占位——模型首 token 前展示打字动画提示，避免用户误以为卡死；
+  // thinking 型模型先出思维链：有 thinking 时显示"思考中…"折叠块（默认收起，可展开看滚动）
   if (m.pending && !m.content && !isUser) {
+    if (m.thinking) {
+      return (
+        <div className="flex justify-start py-1">
+          <ThinkingBlock text={m.thinking} streaming />
+        </div>
+      );
+    }
     return (
       <div className="flex justify-start py-1">
         <div className="flex items-center gap-2 rounded-2xl border border-line bg-card px-4 py-2.5 shadow-paper">
@@ -118,6 +141,8 @@ function Bubble({ m, streaming, delay }) {
           </div>
         ) : (
           <div className="msg-prose break-words">
+            {/* 思维链折叠块（2026-08-18）：默认收起；流式期间展示"思考中…" */}
+            {m.thinking ? <ThinkingBlock text={m.thinking} streaming={streaming} /> : null}
             {streaming && !m.content && (
               <span className="flex gap-1 py-1">
                 {[0, 1, 2].map((i) => (

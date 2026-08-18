@@ -198,6 +198,19 @@ export default function App() {
           }
           return next;
         });
+      } else if (evt.type === 'reasoning_delta') {
+        // 思维链（2026-08-18）：累积到当前 streaming 的 assistant 消息 thinking 字段
+        // （仅前端 UI 状态，不持久化、不发回模型）
+        setMessages((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last && last.role === 'assistant' && last.streaming) {
+            next[next.length - 1] = { ...last, thinking: (last.thinking || '') + evt.delta };
+          } else {
+            next.push({ role: 'assistant', content: '', streaming: true, thinking: evt.delta || '', id: uid() });
+          }
+          return next;
+        });
       } else if (evt.type === 'tool_call') {
         setToolLog((prev) => [...prev, { id: uid(), type: 'tool', toolCall: evt.toolCall }].slice(-300));
         setMessages((prev) => [...prev, { role: 'assistant', content: '', toolCalls: [evt.toolCall], id: uid() }]);
@@ -240,7 +253,15 @@ export default function App() {
             setSession(r.session);
             // 2026-08-17 审查修复：tool 结果不渲染进聊天区（F4）——工具输出已在流式
             // 阶段进 toolLog，done 快照若含 role:'tool' 会以助手气泡混入刷屏
-            setMessages((r.session.messages || []).filter((m) => m.role !== 'tool'));
+            setMessages((prev) => {
+              // 2026-08-18：思维链不持久化在服务端——快照替换前把最后一条 assistant 的 thinking 补回
+              const lastThink = [...prev].reverse().find((m) => m.role === 'assistant' && m.thinking)?.thinking;
+              const base = (r.session.messages || []).filter((m) => m.role !== 'tool');
+              if (lastThink && base.length && base[base.length - 1].role === 'assistant') {
+                base[base.length - 1] = { ...base[base.length - 1], thinking: lastThink };
+              }
+              return base;
+            });
           });
           refreshSessions();
         }

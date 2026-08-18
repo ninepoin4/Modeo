@@ -151,6 +151,8 @@ export class OpenAIProvider {
     const m = data.choices?.[0]?.message || {};
     return {
       content: m.content || '',
+      // 思维链（2026-08-18）：非流式响应里 DeepSeek 风格 reasoning_content / OpenAI 风格 reasoning
+      thinking: m.reasoning_content || m.reasoning || '',
       toolCalls: (m.tool_calls || []).map((tc) => {
         let args = {};
         try {
@@ -229,6 +231,11 @@ export class OpenAIProvider {
           textDeltaCount++;
           yield { type: 'text_delta', delta: delta.content };
         }
+        // 思维链（2026-08-18）：DeepSeek 风格 reasoning_content / OpenAI o1 风格 reasoning
+        const reason = delta.reasoning_content ?? delta.reasoning;
+        if (typeof reason === 'string' && reason) {
+          yield { type: 'reasoning_delta', delta: reason };
+        }
         for (const tc of delta.tool_calls || []) {
           const existing = toolCalls.find((x) => x.index === tc.index);
           if (!existing) {
@@ -266,6 +273,7 @@ export class OpenAIProvider {
     if (textDeltaCount === 0 && toolCalls.length === 0) {
       try {
         const fb = await this.complete(messages, opts);
+        if (fb.thinking) yield { type: 'reasoning_delta', delta: fb.thinking };
         if (fb.content) yield { type: 'text_delta', delta: fb.content };
         if (fb.toolCalls?.length) yield { type: 'tool_calls', toolCalls: fb.toolCalls };
       } catch {
