@@ -311,11 +311,12 @@ export default function SettingsDialog({
   return (
     <>
     <Dialog open onOpenChange={(o) => !o && (dirty ? (toast('有未保存的修改，已放弃', 'info'), onClose()) : onClose())}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-h-[85vh] overflow-y-auto p-0">
+        <div className="flex max-h-[84vh] flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle>设置</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-4">
+        <DialogBody className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           <div className="space-y-3">
             <div>
               <p className="mb-2 text-sm text-ink">模型厂商</p>
@@ -614,12 +615,13 @@ export default function SettingsDialog({
           </div>
           {error && <p className="whitespace-pre-wrap text-xs text-red-700">{error}</p>}
         </DialogBody>
-        <DialogFooter className="sticky bottom-0 z-10 border-t border-line bg-paper/95 backdrop-blur">
+        <DialogFooter className="shrink-0 border-t border-line bg-paper">
           <DialogClose asChild>
             <Button variant="ghost">取消</Button>
           </DialogClose>
           <Button onClick={save}>保存</Button>
         </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
     {confirmMode && (
