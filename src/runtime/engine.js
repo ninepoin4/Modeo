@@ -550,7 +550,17 @@ export async function runAgentTurn(opts) {
       return { status: 'done', messageId: finalMsg.id };
     }
 
-    emit({ type: SSE_EVENTS.DONE, messageId: null, truncated: true });
+    // 2026-08-18 修复：迭代耗尽前先落一条可见的提示消息（此前 truncated 事件前端
+    // 不展示，用户看到的是"突然不走了"且无任何说明）
+    const truncMsg = msg(
+      'assistant',
+      `（任务达到迭代上限 ${maxIterations} 轮仍未完成，已提前结束。可以缩小任务范围重试，或换一个更具体的指令。）`,
+      { id: randomUUID() }
+    );
+    session.messages.push(truncMsg);
+    session.updatedAt = new Date().toISOString();
+    persist(session);
+    emit({ type: SSE_EVENTS.DONE, messageId: truncMsg.id, truncated: true });
     return { status: 'truncated' };
   } catch (err) {
     // 客户端停止（abort）：不 emit error（前端已断开），静默返回，避免虚假错误提示

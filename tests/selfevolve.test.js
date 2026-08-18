@@ -527,3 +527,39 @@ test('provider: OpenAIProvider.stream 解析 reasoning_content 与 reasoning', a
   assert.equal(texts.join(''), '正文');
   await new Promise((r) => mock.close(r));
 });
+
+// 2026-08-18 修复：迭代耗尽时落一条可见提示消息（此前 truncated 前端不展示，用户看到"突然不走了"）
+test('engine: 迭代耗尽 → truncated + 提示消息落盘', async () => {
+  const session = makeSession('code');
+  session.messages.push({ role: 'user', content: '一直调用工具的任务', id: 'u1' });
+  // 永不结束的 provider：每轮都发 tool_calls
+  const endlessProvider = {
+    async *stream() {
+      yield { type: 'tool_calls', toolCalls: [{ id: 'tc-loop', name: 'write_file', args: { path: 'f.txt', content: 'x' } }] };
+    },
+  };
+  const harness = {
+    ...harnesses.find((h) => h.id === 'code'),
+    context: { ...(harnesses.find((h) => h.id === 'code').context || {}), maxIterations: 3 },
+  };
+  const events = [];
+  const result = await runAgentTurn({
+    session,
+    harness,
+    character: null,
+    provider: endlessProvider,
+    toolRegistry: createCodeTools(wsRoot),
+    approvals,
+    workspaceRoot: wsRoot,
+    persist: store.saveSession,
+    settings: {},
+    emit: (e) => events.push(e),
+  });
+  assert.equal(result.status, 'truncated', '迭代耗尽应返回 truncated');
+  assert.ok(events.some((e) => e.type === 'done' && e.truncated === true), 'done 事件应带 truncated 标记');
+  const msgs = store.getSession(session.id).messages;
+  const last = msgs[msgs.length - 1];
+  assert.equal(last.role, 'assistant');
+  assert.match(last.content, /迭代上限/, '最后应有一条提示迭代上限的可见消息');
+});
+
