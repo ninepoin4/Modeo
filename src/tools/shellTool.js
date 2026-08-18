@@ -181,7 +181,7 @@ function killTree(child) {
 export function createShellTool(workspaceRoot) {
   return {
     name: 'shell',
-    description: '在沙箱工作区内执行 shell 命令。危险命令（删除、格式化、系统级操作）需要审批。',
+    description: '在沙箱工作区内执行 shell 命令（Windows 环境为 cmd.exe，Unix 环境为 /bin/sh）。Windows 下没有 pwd/ls/cat/rm/cp/mv 等 Unix 命令：当前目录用 cd（不带参数），列目录用 dir，查看文件用 type，删除用 del，复制用 copy，移动用 move。危险命令（删除、格式化、系统级操作）需要审批。',
     parameters: {
       type: 'object',
       properties: {
