@@ -643,6 +643,12 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       try {
         const cfg = typeof body.config === 'string' ? parseYaml(body.config) : body.config;
+        // 2026-08-18 外部审查修复：自定义 harness 拒绝 approval.mode:'none'——工具层拦截
+        // 只看命令本身与会话权限（permissionMode），harness 声明 'none' 无实际效果且会
+        // 误导模型（提示词宣称"无审批"）；无审批只能经会话权限切换（confirm 二次确认）启用
+        if (cfg?.approval?.mode === 'none') {
+          return sendJson(res, 400, { error: 'approval.mode 不支持 none：无审批模式只能通过会话权限切换（需二次确认）启用' });
+        }
         const errors = validateHarnessShape(cfg);
         if (errors.length) return sendJson(res, 400, { error: `模式配置校验失败: ${errors.join('；')}` });
         if (MODE_IDS.includes(cfg.id)) return sendJson(res, 400, { error: '不允许覆盖内置模式' });

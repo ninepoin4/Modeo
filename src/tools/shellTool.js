@@ -126,7 +126,35 @@ function isDangerous(command) {
   // 跨管道"下载即执行"必须在整条命令级检测（分段会拆掉管道关系）
   if (PIPE_EXEC_PATTERNS.some((re) => re.test(cmd))) return true;
   const segments = segmentCommand(cmd);
-  return segments.some((seg) => DANGEROUS_PATTERNS.some((re) => re.test(seg)));
+  if (segments.some((seg) => DANGEROUS_PATTERNS.some((re) => re.test(seg)))) return true;
+  // 2026-08-18 外部审查修复：递归列目录 + 删除类命令的管道/链式组合——
+  // 各段单独看都不危险（Remove-Item 无 -recurse/-force 旗标），组合后等于递归删除。
+  if (hasRecursiveDeletePipe(segments)) return true;
+  return false;
+}
+
+/** 递归列出段（find 默认递归；gci/dir/ls 需递归旗标） */
+function isRecursiveListSeg(seg) {
+  if (/\bfind\b/i.test(seg)) return true;
+  if (/\b(?:get-childitem|gci)\b[^\n]*(?:-r\b|-recurse\b)/i.test(seg)) return true;
+  if (/\b(?:dir|ls)\b[^\n]*\/(?:[a-z]*s\b)/i.test(seg)) return true; // dir /s
+  if (/\bls\b[^\n]*-R\b/i.test(seg)) return true; // ls -R
+  return false;
+}
+
+/** 删除类命令段 */
+function isDeleteSeg(seg) {
+  return /\b(?:remove-item|rm|del|erase|rd|rmdir|unlink)\b/i.test(seg);
+}
+
+/** 递归列目录段后接删除类段 = 递归删除（2026-08-18 外部审查绕过样本修复） */
+function hasRecursiveDeletePipe(segments) {
+  let sawRecurseList = false;
+  for (const seg of segments) {
+    if (isRecursiveListSeg(seg)) sawRecurseList = true;
+    if (sawRecurseList && isDeleteSeg(seg)) return true;
+  }
+  return false;
 }
 
 function killTree(child) {

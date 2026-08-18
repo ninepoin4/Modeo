@@ -68,6 +68,28 @@ test('shell: 危险命令需审批', async () => {
   assert.ok(r3.output.length > 0);
 });
 
+// 2026-08-18 外部审查修复：递归列目录 + 删除类命令的管道组合（各段单独看都不危险）
+test('shell: 递归列表 + 删除的管道组合需审批（绕过样本回归）', async () => {
+  const st = createShellTool(root);
+  const bypassSamples = [
+    'Get-ChildItem -Recurse -Filter *.tmp | Remove-Item',
+    'Get-ChildItem -Recurse | Remove-Item',
+    'dir /s /b | Remove-Item',
+    'find . | xargs rm',
+    'ls -R | rm -f {}',
+    'Get-ChildItem -Recurse; Remove-Item',
+  ];
+  for (const cmd of bypassSamples) {
+    assert.equal(isDangerous(cmd), true, `应拦截：${cmd}`);
+    const r = await st.execute({ command: cmd });
+    assert.equal(r.needsApproval, true, `执行应请求审批：${cmd}`);
+  }
+  // 不误伤：递归列出但无删除段 / 删除但无递归列出
+  assert.equal(isDangerous('Get-ChildItem -Recurse | Select-Object Name'), false);
+  assert.equal(isDangerous('dir /s /b | findstr .tmp'), false);
+  assert.equal(isDangerous('Remove-Item -Path C:/Windows/x.txt'), false);
+});
+
 test('shell: 超时返回 isError', async () => {
   const st = createShellTool(root);
   const cmd = process.platform === 'win32' ? 'ping -n 20 127.0.0.1 >nul' : 'sleep 20';

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { loadHarnessConfigs, getEffectiveSystemPrompt, renderCharacterPrompt } from '../src/core/harness.js';
 import { loadUserHarnessConfigs } from '../src/core/harness.js';
+import { validateHarnessShape } from '../src/core/types.js';
 import fs from 'node:fs';
 import os from 'node:os';
 
@@ -80,4 +81,16 @@ test('harness: 用户模式目录加载（损坏文件跳过）', () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// 2026-08-18 外部审查修复：'none' 拒绝在 server 路由（POST /api/modes），validateHarnessShape
+// 保持白名单语义（内置 chat.yaml 用 'none'）；本测试锁死该契约防回归。
+test('types: validateHarnessShape 对 approval.mode none 保持白名单兼容（内置 chat 用）', () => {
+  const base = { id: 'x-mode', name: 'X', tools: [], defaultModel: 'mock' };
+  assert.deepEqual(validateHarnessShape(base), [], '基础配置应通过');
+  assert.deepEqual(validateHarnessShape({ ...base, approval: { mode: 'none' } }), [], 'none 应通过白名单（拒绝在 server 路由层）');
+  assert.deepEqual(validateHarnessShape({ ...base, approval: { mode: 'dangerous-only' } }), [], 'dangerous-only 应通过');
+  assert.deepEqual(validateHarnessShape({ ...base, approval: { mode: 'all' } }), [], 'all 应通过');
+  const bad = validateHarnessShape({ ...base, approval: { mode: 'sneaky' } });
+  assert.ok(bad.length > 0, '非法 mode 应拒绝');
 });

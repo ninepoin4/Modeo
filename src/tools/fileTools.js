@@ -55,6 +55,12 @@ export function createFileTools(workspaceRoot) {
       '列出工作区内目录的内容',
       { type: 'object', properties: { path: { type: 'string' } } },
       async ({ path: p = '.' } = {}, ctx = {}) => {
+        // 2026-08-18 外部审查修复：与 read/write/edit 对齐——敏感路径（.ssh/.aws/.gnupg 等）
+        // 列目录也走审批（此前仅 shell 侧拦截，文件工具侧漏）
+        const gate = sensitiveCheck(workspaceRoot, ctx, p);
+        if (gate.blocked) {
+          return { output: `[敏感路径访问，等待审批] ${p}`, isError: false, needsApproval: true, approvalReason: gate.reason };
+        }
         const dir = resolvePath(workspaceRoot, ctx, p);
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         const lines = entries.map((e) => `${e.isDirectory() ? '[dir] ' : '[file]'} ${e.name}`);
