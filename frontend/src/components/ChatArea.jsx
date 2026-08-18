@@ -129,7 +129,7 @@ function Bubble({ m, streaming, delay }) {
   );
 }
 
-export default function ChatArea({ session, messages, streaming, characterName, defaultModel, onSend, onStop, onTransparency, onSlashCommand, onUnknownSlash, onPermissionChange }) {
+export default function ChatArea({ session, messages, streaming, characterName, defaultModel, models = [], onSend, onStop, onTransparency, onSlashCommand, onUnknownSlash, onPermissionChange }) {
   const [text, setText] = useState('');
   const [showBottom, setShowBottom] = useState(false);
   const [suggestDismissed, setSuggestDismissed] = useState(false);
@@ -295,30 +295,53 @@ export default function ChatArea({ session, messages, streaming, characterName, 
             <div className="flex items-center gap-1 rounded-full border border-line bg-card/60 px-2.5 py-1 text-xs text-muted transition-colors hover:border-ink/40">
               <span>模型</span>
               {editingModel ? (
-                <>
-                  <input
-                    data-testid="model-input"
-                    autoFocus
-                    value={modelDraft}
-                    onChange={(e) => setModelDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                        e.preventDefault();
-                        confirmModel();
-                      } else if (e.key === 'Escape') {
-                        setEditingModel(false);
-                      }
-                    }}
-                    placeholder={defaultModel || '模型名'}
-                    className="w-28 bg-transparent font-mono text-ink outline-none placeholder:text-muted"
-                  />
-                  <button data-testid="model-confirm" onClick={confirmModel} className="text-muted hover:text-ink" title="确认">
-                    <Check className="h-3 w-3" />
-                  </button>
-                  <button onClick={() => setEditingModel(false)} className="text-muted hover:text-ink" title="取消">
-                    <X className="h-3 w-3" />
-                  </button>
-                </>
+                models.length ? (
+                  <>
+                    <select
+                      data-testid="model-input"
+                      autoFocus
+                      value={modelDraft || models[0]}
+                      onChange={(e) => setModelDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setEditingModel(false);
+                      }}
+                      onBlur={confirmModel}
+                      className="w-40 bg-transparent font-mono text-ink outline-none"
+                    >
+                      {models.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    <button data-testid="model-confirm" onClick={confirmModel} className="text-muted hover:text-ink" title="确认">
+                      <Check className="h-3 w-3" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      data-testid="model-input"
+                      autoFocus
+                      value={modelDraft}
+                      onChange={(e) => setModelDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          confirmModel();
+                        } else if (e.key === 'Escape') {
+                          setEditingModel(false);
+                        }
+                      }}
+                      placeholder={defaultModel || '模型名'}
+                      className="w-28 bg-transparent font-mono text-ink outline-none placeholder:text-muted"
+                    />
+                    <button data-testid="model-confirm" onClick={confirmModel} className="text-muted hover:text-ink" title="确认">
+                      <Check className="h-3 w-3" />
+                    </button>
+                    <button onClick={() => setEditingModel(false)} className="text-muted hover:text-ink" title="取消">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </>
+                )
               ) : (
                 <button
                   data-testid="model-chip"

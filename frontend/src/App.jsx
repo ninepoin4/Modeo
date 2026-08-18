@@ -815,6 +815,7 @@ export default function App() {
             streaming={streaming}
             characterName={activeCharacter}
             defaultModel={settings?.model}
+            models={(settings?.providers || []).find((p) => p.id === settings?.activeProviderId)?.models || []}
             onSend={sendMessage}
             onStop={stopStreaming}
             onTransparency={() => setDialog((d) => ({ ...d, transparency: true }))}

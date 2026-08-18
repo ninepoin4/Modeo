@@ -111,6 +111,12 @@ export default function SettingsDialog({
 
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
 
+  // 未保存检测：draft 与传入 settings 不一致（含 keyInputs）时关闭给提示
+  const dirty = useMemo(() => {
+    if (JSON.stringify(draft) !== JSON.stringify(settings)) return true;
+    return Object.values(keyInputs).some((v) => v !== undefined && v !== null && v !== '');
+  }, [draft, settings, keyInputs]);
+
   // ---- 多厂商 helpers（2026-08-18）----
   const providers = draft.providers || [];
   const activeProvider = providers.find((p) => p.id === draft.activeProviderId) || null;
@@ -156,6 +162,8 @@ export default function SettingsDialog({
       };
       const r = await api.saveSettings(payload);
       onSave(r.settings);
+      const act = r.settings.providers?.find((p) => p.id === r.settings.activeProviderId);
+      toast(`设置已保存（当前厂商：${act?.name || '未配置'}）`, 'success');
       onClose();
     } catch (e) {
       setError(e.message);
@@ -302,7 +310,7 @@ export default function SettingsDialog({
 
   return (
     <>
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
+    <Dialog open onOpenChange={(o) => !o && (dirty ? (toast('有未保存的修改，已放弃', 'info'), onClose()) : onClose())}>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>设置</DialogTitle>
@@ -606,7 +614,7 @@ export default function SettingsDialog({
           </div>
           {error && <p className="whitespace-pre-wrap text-xs text-red-700">{error}</p>}
         </DialogBody>
-        <DialogFooter>
+        <DialogFooter className="sticky bottom-0 z-10 border-t border-line bg-paper/95 backdrop-blur">
           <DialogClose asChild>
             <Button variant="ghost">取消</Button>
           </DialogClose>
