@@ -689,6 +689,12 @@ const server = http.createServer(async (req, res) => {
       try {
         const cfg = typeof body.config === 'string' ? parseYaml(body.config) : body.config;
         if (cfg.id !== id) return sendJson(res, 400, { error: '配置 id 与路径不一致' });
+        // 2026-08-18 二审修复：PUT 覆盖更新同样拒绝 approval.mode:'none'（与 POST 对齐——
+        // 此前 PUT 仅校验 validateHarnessShape（白名单含 'none'），可把 POST 创建的模式覆盖成
+        // 无审批态，绕过工具层拦截）
+        if (cfg?.approval?.mode === 'none') {
+          return sendJson(res, 400, { error: 'approval.mode 不支持 none：无审批模式只能通过会话权限切换（需二次确认）启用' });
+        }
         const errors = validateHarnessShape(cfg);
         if (errors.length) return sendJson(res, 400, { error: `模式配置校验失败: ${errors.join('；')}` });
         fs.writeFileSync(file, stringifyYaml(cfg), 'utf8');

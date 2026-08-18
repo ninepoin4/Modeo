@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveSafePath, SandboxError } from './sandbox.js';
+import { isSensitiveAccess } from './shellTool.js';
 
 const MAX_IMAGE = 4 * 1024 * 1024; // 4MB（base64 后约 5.3MB）
 const IMG_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']);
@@ -43,6 +44,19 @@ export function createImageTools(workspaceRoot) {
           return { output: `不支持的图片类型: ${ext || '无扩展名'}（支持 png/jpg/jpeg/gif/webp/bmp）`, isError: true };
         }
         if (!fs.existsSync(abs)) return { output: `文件不存在: ${p}`, isError: true };
+        // 2026-08-18 二审修复：read_image 补敏感路径门禁（对齐 read_file/write_file/edit_file）——
+        // 此前无 sensitiveCheck，可无审批读取 .env/.ssh 等
+        if (!ctx?.aggressive && !ctx?.forceApproved) {
+          const seg = `cat ${abs}`;
+          if (isSensitiveAccess(seg)) {
+            return {
+              output: `[敏感路径访问，等待审批] 图片 ${p}`,
+              isError: false,
+              needsApproval: true,
+              approvalReason: `read_image 将访问敏感路径（密钥/凭据/设置文件）：${p}`,
+            };
+          }
+        }
         const stat = fs.statSync(abs);
         if (stat.size > MAX_IMAGE) {
           return { output: `图片过大（${(stat.size / 1024 / 1024).toFixed(1)}MB > 4MB 上限）`, isError: true };

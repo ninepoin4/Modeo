@@ -385,3 +385,50 @@ test('browser: assertLocalWebUrl 白名单', async () => {
 });
 
 // 2026-08-18 长驻终端已覆盖；补 shell background 已在 process 测试。plan/run_lint 由 registry 覆盖。
+
+
+// 2026-08-18 二审安全修复回归（SSRF / ReDoS / read_image 敏感门禁）
+test('web_fetch: 拦截私网/回环/链路本地地址（SSRF）', async () => {
+  const { createSearchTools } = await import('../src/tools/searchTools.js');
+  const t = createSearchTools(root);
+  const blocked = [
+    'http://127.0.0.1:8080/x',
+    'http://localhost:5173',
+    'http://169.254.169.254/latest/meta-data',
+    'http://10.0.0.1/a',
+    'http://192.168.1.1/b',
+    'http://172.16.0.5/c',
+    'http://172.31.255.254/d',
+  ];
+  for (const u of blocked) {
+    const r = await t.web_fetch.execute({ url: u });
+    assert.ok(r.isError, '应拒绝 ' + u + ': ' + r.output);
+  }
+  // 公网放行到错误响应（域名合法但抓取失败——证明未被我方拦截逻辑拦掉）
+  const r = await t.web_fetch.execute({ url: 'http://example.com' });
+  assert.ok(r.isError && !/拒绝访问内网/.test(r.output), '公网地址不应被 SSRF 拦截');
+});
+
+test('grep: 拒绝过长正则与嵌套量词（ReDoS 缓解）', async () => {
+  const { createSearchTools } = await import('../src/tools/searchTools.js');
+  const t = createSearchTools(root);
+  fs.writeFileSync(path.join(root, 'x.txt'), 'hello\nworld');
+  const r1 = await t.grep.execute({ pattern: 'a'.repeat(300) });
+  assert.ok(r1.isError && /不安全|过长/.test(r1.output), '过长正则应拒绝: ' + r1.output);
+  const r2 = await t.grep.execute({ pattern: '(a+)+b' });
+  assert.ok(r2.isError && /嵌套量词/.test(r2.output), '嵌套量词应拒绝: ' + r2.output);
+  const r3 = await t.grep.execute({ pattern: 'hello' });
+  assert.ok(!r3.isError && r3.output.includes('hello'), '正常正则应工作');
+});
+
+test('read_image: 敏感路径需审批（对齐 fileTools）', async () => {
+  const { createImageTools } = await import('../src/tools/imageTools.js');
+  const b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  fs.mkdirSync(path.join(root, '.ssh'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.ssh', 'key.png'), Buffer.from(b64, 'base64'));
+  const t = createImageTools(root);
+  const r = await t.read_image.execute({ path: '.ssh/key.png' }, { session: { id: 's' } });
+  assert.ok(r.needsApproval === true, '敏感路径应 needsApproval: ' + JSON.stringify(r));
+  const r2 = await t.read_image.execute({ path: '.ssh/key.png' }, { session: { id: 's' }, forceApproved: true });
+  assert.ok(!r2.needsApproval && !r2.isError, 'forceApproved 应放行: ' + r2.output.slice(0, 60));
+});

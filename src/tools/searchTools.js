@@ -17,6 +17,31 @@ const MAX_GREP_FILE = 1024 * 1024;
 const MAX_FETCH_BYTES = 32 * 1024;
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'release', '.cache', 'coverage', '.next', '.nuxt', '.workbuddy', '.audit-data']);
 
+/** 私网/回环/链路本地 IP 判定（2026-08-18 二审 SSRF 修复）：拦截元数据与内网地址 */
+function isPrivateIp(host) {
+  const h = String(host || '').replace(/^\[|\]$/g, '').toLowerCase();
+  if (h === 'localhost' || h === '::1') return true;
+  // IPv6 私网/链路本地前缀
+  if (/^[fF][cCdD]/.test(h)) return true;
+  if (/^(?:169\.254\.|10\.|127\.|192\.168\.)/.test(h)) return true;
+  // 172.16.0.0 - 172.31.255.255
+  const m = h.match(/^172\.(\d{1,3})\./);
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true;
+  // 0.0.0.0 / 非法
+  if (/^0\.0\.0\.0/.test(h)) return true;
+  return false;
+}
+
+/** grep 正则守卫：限制长度 + 拒绝高危嵌套量词（ReDoS 缓解，2026-08-18 二审修复） */
+const MAX_PATTERN = 200;
+function isSafePattern(p) {
+  if (p.length > MAX_PATTERN) return false;
+  // 连续两层以上嵌套量词（如 (a+)+、(a*)*、(a|a?)+）是 ReDoS 主因
+  if (/\([^)]*[+*][^)]*\)[+*]/.test(p)) return false;
+  if (/(?:[+*]\s*){2,}/.test(p)) return false;
+  return true;
+}
+
 function resolvePath(workspaceRoot, ctx, p) {
   if (ctx?.aggressive && path.isAbsolute(p)) return path.resolve(p);
   return resolveSafePath(workspaceRoot, p);
@@ -155,6 +180,7 @@ export function createSearchTools(workspaceRoot) {
       },
       async ({ pattern, path: p = '.', caseSensitive = false } = {}, ctx = {}) => {
         if (!pattern || typeof pattern !== 'string') return { output: '缺少 pattern 参数', isError: true };
+        if (!isSafePattern(pattern)) return { output: `正则不安全或过长（>${MAX_PATTERN} 字符，或含嵌套量词）——请简化表达式`, isError: true };
         const dir = resolvePath(workspaceRoot, ctx, p);
         if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return { output: `目录不存在: ${p}`, isError: true };
         let regex;
@@ -182,6 +208,17 @@ export function createSearchTools(workspaceRoot) {
       },
       async ({ url } = {}) => {
         if (!url || !/^https?:\/\//i.test(url)) return { output: 'url 必须是 http(s) 链接', isError: true };
+        // 2026-08-18 二审 SSRF 修复：拦截私网/回环/链路本地（云元数据 169.254.169.254 等），
+        // 防止模型被网页内容诱导抓取内网资源
+        let hostname = '';
+        try {
+          hostname = new URL(url).hostname;
+        } catch {
+          return { output: 'url 不合法', isError: true };
+        }
+        if (isPrivateIp(hostname)) {
+          return { output: `拒绝访问内网/回环地址 ${hostname}（防 SSRF）`, isError: true };
+        }
         try {
           const res = await netFetch(url, { signal: AbortSignal.timeout(15000) });
           if (!res.ok) return { output: `HTTP ${res.status}`, isError: true };
