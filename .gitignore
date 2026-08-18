@@ -8,3 +8,4 @@ workspaces/*/
 data/
 *.log
 .DS_Store
+.audit-data/
