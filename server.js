@@ -24,6 +24,7 @@ import { createAllTools } from './src/tools/registry.js';
 import { loadPlugins } from './src/tools/pluginLoader.js';
 import { listCheckpoints, restoreCheckpoint, ensureBaseline, getBaselineDir } from './src/tools/checkpoints.js';
 import { diffWorkspace } from './src/tools/diff.js';
+import { cleanupSession } from './src/tools/processManager.js';
 import * as charManager from './src/characters/manager.js';
 import { normalizeCharacter, validateCharacter } from './src/characters/schema.js';
 import { importCcv3, exportCcv3 } from './src/characters/ccv3.js';
@@ -115,6 +116,8 @@ const DEFAULT_SETTINGS = {
   activeProviderId: 'mock',
   providers: [],
   workspaceDir: '',
+  // 2026-08-18 MCP 服务器配置（P2-⑦）：[{ id, name, command, args, url, headers, enabled }]
+  mcpServers: [],
 };
 
 /**
@@ -717,6 +720,8 @@ const server = http.createServer(async (req, res) => {
       if (!id) return sendJson(res, 400, { error: '缺少会话 id' });
       return withSessionLock(id, async () => {
         try {
+          // 2026-08-18 长驻终端：删除会话时终止其全部后台任务
+          cleanupSession(id);
           sessionStore.deleteSession(id);
           // 顺带清理该会话的快照、基线与事件日志（目录不存在则跳过）
           deleteSessionEvents(DATA_DIR, id);

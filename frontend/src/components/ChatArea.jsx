@@ -171,7 +171,7 @@ function Bubble({ m, streaming, delay }) {
   );
 }
 
-export default function ChatArea({ session, messages, streaming, characterName, defaultModel, models = [], onSend, onStop, onTransparency, onSlashCommand, onUnknownSlash, onPermissionChange }) {
+export default function ChatArea({ session, messages, streaming, characterName, defaultModel, models = [], contextTokens, onSend, onStop, onTransparency, onSlashCommand, onUnknownSlash, onPermissionChange }) {
   const [text, setText] = useState('');
   const [showBottom, setShowBottom] = useState(false);
   const [suggestDismissed, setSuggestDismissed] = useState(false);
@@ -299,6 +299,11 @@ export default function ChatArea({ session, messages, streaming, characterName, 
       <header className="flex items-center justify-between border-b border-line px-6 py-3.5">
         <div className="flex items-baseline gap-3">
           <span className="font-serif-display text-lg text-ink">{name}</span>
+          {typeof contextTokens === 'number' && contextTokens > 0 && (
+            <span className="text-[11px] text-muted" title="当前上下文 token 估算（字符数/3.5 粗估）">
+              上下文 ~{(contextTokens / 1000).toFixed(1)}k tokens
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {characterName && <Badge>角色 · {characterName}</Badge>}

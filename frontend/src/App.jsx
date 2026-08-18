@@ -67,6 +67,7 @@ export default function App() {
   const [selectedMode, setSelectedMode] = useState('chat');
   const [selectedCharacterId, setSelectedCharacterId] = useState(null);
   const [streaming, setStreaming] = useState(false);
+  const [contextTokens, setContextTokens] = useState(null); // 2026-08-18 P1-④：上下文 token 估算显示
   const [pendingApproval, setPendingApproval] = useState(null);
   const [pendingQuestion, setPendingQuestion] = useState(null);
   const [ready, setReady] = useState(false);
@@ -240,6 +241,7 @@ export default function App() {
         setStreaming(false);
       } else if (evt.type === 'done') {
         setStreaming(false);
+        if (typeof evt.tokenEstimate === 'number') setContextTokens(evt.tokenEstimate);
         // 2026-08-17 审查修复：兜底清理挂起弹窗（正常流程审批挂起时不会到 done，防御残留）
         setPendingApproval(null);
         setPendingQuestion(null);
@@ -869,6 +871,7 @@ export default function App() {
             characterName={activeCharacter}
             defaultModel={settings?.model}
             models={(settings?.providers || []).find((p) => p.id === settings?.activeProviderId)?.models || []}
+            contextTokens={contextTokens}
             onSend={sendMessage}
             onStop={stopStreaming}
             onTransparency={() => setDialog((d) => ({ ...d, transparency: true }))}

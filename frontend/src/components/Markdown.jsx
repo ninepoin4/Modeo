@@ -76,7 +76,25 @@ function CodeBlock({ code, lang }) {
           {copied ? '已复制' : '复制'}
         </button>
       </div>
-      <pre className="overflow-x-auto p-3 font-mono text-[12.5px] leading-relaxed text-ink-soft">{code}</pre>
+      <pre className="overflow-x-auto p-3 font-mono text-[12.5px] leading-relaxed text-ink-soft">
+        {lang === 'diff'
+          ? code.split('\n').map((line, i) => {
+              // 2026-08-18 P2-⑨：可视化 diff——+ 新增(绿) / - 删除(红) / @@ 位置(蓝) / 其余默认
+              const cls = line.startsWith('+')
+                ? 'block bg-emerald-500/10 text-emerald-700'
+                : line.startsWith('-')
+                  ? 'block bg-rose-500/10 text-rose-600'
+                  : line.startsWith('@@')
+                    ? 'block bg-sky-500/10 text-sky-700'
+                    : 'block';
+              return (
+                <span key={i} className={cls}>
+                  {line || ' '}
+                </span>
+              );
+            })
+          : code}
+      </pre>
     </div>
   );
 }

@@ -129,9 +129,22 @@ function snapshotBefore(session, workspaceRoot, tc, emit) {
 
 /** 工具结果入历史统一截断（2026-08-15 修复：read_file 2MB 曾原样入历史撑爆上下文） */
 const RESULT_MAX = 64 * 1024;
-function truncateResult(s) {
+// read_image 豁免：多模态模型需要完整 base64（2026-08-18 审查修复：64KB 截断会破坏图片）
+const IMG_RESULT_MAX = 8 * 1024 * 1024;
+function truncateResult(s, toolName) {
   const str = String(s ?? '');
-  return str.length > RESULT_MAX ? `${str.slice(0, RESULT_MAX)}\n…[输出已截断]` : str;
+  const max = toolName === 'read_image' ? IMG_RESULT_MAX : RESULT_MAX;
+  return str.length > max ? `${str.slice(0, max)}\n…[输出已截断]` : str;
+}
+
+/** 上下文 token 粗略估算（2026-08-18 P1-④）：按序列化字符数/3.5，中英文混合粗估 */
+function estimateTokens(messages) {
+  try {
+    const len = JSON.stringify(messages || []).length;
+    return Math.max(0, Math.round(len / 3.5));
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -234,7 +247,7 @@ export async function runAgentTurn(opts) {
         // 只补 tool 结果：包含该 toolCall 的 assistant 消息已在挂起审批时持久化（主循环），
         // 若再 push 一条 assistant 会形成 A(X),A(X),T(X)，OpenAI 第二轮 400。
         session.messages.push(
-          msg('tool', truncateResult(result.output), { id: randomUUID(), toolCallId: pending.toolCall.id, name: pending.toolCall.name })
+          msg('tool', truncateResult(result.output, pending.toolCall.name), { id: randomUUID(), toolCallId: pending.toolCall.id, name: pending.toolCall.name })
         );
       } else if (approval.status === 'denied') {
         session.messages.push(
@@ -425,6 +438,27 @@ export async function runAgentTurn(opts) {
             questionPending = true;
             continue; // 同批其余工具继续执行并配对（resume 时只补 ask_user 的回答）
           }
+          // plan：提交执行计划并挂起等待批准（P1-③ 2026-08-18，复用 pendingQuestion 通道）
+          if (tc.name === 'plan') {
+            const plan = String(tc.args?.plan || '').trim();
+            if (!plan) {
+              const r = { output: 'plan 需要 plan 参数（markdown 计划）', isError: true };
+              session.messages.push(msg('tool', r.output, { id: randomUUID(), toolCallId: tc.id, name: tc.name }));
+              emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: tc, result: r });
+              continue;
+            }
+            const title = String(tc.args?.title || '').trim().slice(0, 40);
+            session.pendingQuestion = {
+              toolCall: tc,
+              question: `${title ? `【${title}】\n` : ''}已提交执行计划，是否批准执行？\n\n${plan.slice(0, 4000)}`,
+              options: ['批准执行', '修改计划', '取消'],
+              askedAt: new Date().toISOString(),
+            };
+            persist(session);
+            emit({ type: SSE_EVENTS.QUESTION_REQUIRED, question: session.pendingQuestion.question, options: session.pendingQuestion.options });
+            questionPending = true;
+            continue;
+          }
           const tool = toolRegistry.get(tc.name);
           if (!tool) {
             const r = { output: `未知工具: ${tc.name}`, isError: true };
@@ -509,7 +543,7 @@ export async function runAgentTurn(opts) {
             const r = await h(ctx, tc, out);
             if (r?.result) out = r.result;
           }
-          session.messages.push(msg('tool', truncateResult(out.output), { id: randomUUID(), toolCallId: tc.id, name: tc.name }));
+          session.messages.push(msg('tool', truncateResult(out.output, tc.name), { id: randomUUID(), toolCallId: tc.id, name: tc.name }));
           emit({ type: SSE_EVENTS.TOOL_RESULT, toolCall: tc, result: out });
           if (out?.isError) toolErrorCount++; // 技能沉淀触发统计（踩坑信号）
         }
@@ -546,7 +580,7 @@ export async function runAgentTurn(opts) {
           distillSkill({ provider, messages: distillMsgs, dataDir, sessionId: session.id }).catch(() => {});
         });
       }
-      emit({ type: SSE_EVENTS.DONE, messageId: finalMsg.id });
+      emit({ type: SSE_EVENTS.DONE, messageId: finalMsg.id, tokenEstimate: estimateTokens(session.messages) });
       return { status: 'done', messageId: finalMsg.id };
     }
 
@@ -560,7 +594,7 @@ export async function runAgentTurn(opts) {
     session.messages.push(truncMsg);
     session.updatedAt = new Date().toISOString();
     persist(session);
-    emit({ type: SSE_EVENTS.DONE, messageId: truncMsg.id, truncated: true });
+    emit({ type: SSE_EVENTS.DONE, messageId: truncMsg.id, truncated: true, tokenEstimate: estimateTokens(session.messages) });
     return { status: 'truncated' };
   } catch (err) {
     // 客户端停止（abort）：不 emit error（前端已断开），静默返回，避免虚假错误提示

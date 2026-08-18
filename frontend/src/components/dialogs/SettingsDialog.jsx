@@ -91,6 +91,8 @@ export default function SettingsDialog({
   // 多厂商（2026-08-18）：每个厂商的 apiKey 输入临时值（'' = 未修改保留 / null = 清除）；脱敏后无明文，输入框单独管理
   const [keyInputs, setKeyInputs] = useState({});
   const [modelsBusy, setModelsBusy] = useState(false);
+  // 2026-08-18 MCP 服务器 JSON 编辑态（P2-⑦）
+  const [mcpJson, setMcpJson] = useState(() => JSON.stringify(settings?.mcpServers || [], null, 2));
 
   // 仅在弹窗挂载时初始化草稿；settings 后续变化（如主题切换）不同步，避免清空未保存编辑
   const initRef = useRef(false);
@@ -154,11 +156,22 @@ export default function SettingsDialog({
     try {
       // 多厂商（2026-08-18）：providers 数组整体保存；每个厂商 apiKey 由输入框临时值决定
       // （'' = 服务端保留原值 / null = 清除）；theme 用当前 themeId 覆盖
+      // MCP（2026-08-18 P2-⑦）：JSON 解析失败则中止保存并提示
+      let mcpServers = draft.mcpServers;
+      try {
+        const parsed = JSON.parse(mcpJson || '[]');
+        if (!Array.isArray(parsed)) throw new Error('必须是数组');
+        mcpServers = parsed;
+      } catch (e) {
+        setError(`MCP 服务器 JSON 解析失败：${e.message}`);
+        return;
+      }
       const payload = {
         ...draft,
         providers: (draft.providers || []).map((p) => ({ ...p, apiKey: keyInputs[p.id] ?? '' })),
         activeProviderId: draft.activeProviderId,
         theme: themeId,
+        mcpServers,
       };
       const r = await api.saveSettings(payload);
       onSave(r.settings);
@@ -451,6 +464,21 @@ export default function SettingsDialog({
               />
               <span className="mt-1 block text-[11px] text-muted/80">
                 建议指向你的项目根目录（如 Modeo 自身源码目录），AI 即可读取/修改项目文件；危险命令仍需审批。保存后需重启 Modeo 生效。
+              </span>
+            </label>
+            {/* 2026-08-18：MCP 服务器配置（P2-⑦）——JSON 数组，stdio 或 HTTP 均可 */}
+            <label className="mt-3 block">
+              <span className="mb-1 block text-xs text-muted">MCP 服务器（JSON，AI 可调用外部工具/服务）</span>
+              <textarea
+                value={mcpJson}
+                onChange={(e) => setMcpJson(e.target.value)}
+                rows={4}
+                spellCheck={false}
+                placeholder='[{"id":"my-server","name":"我的服务","command":"npx","args":["-y","@some/mcp-server"]}]'
+                className="w-full rounded-xl border border-line bg-card px-3 py-2 font-mono text-xs text-ink focus:border-ink/50 focus:outline-none"
+              />
+              <span className="mt-1 block text-[11px] text-muted/80">
+                数组格式：stdio 用 command+args，HTTP 用 url+headers（可选）。保存后 AI 即可用 mcp_list_tools / mcp_call 调用。
               </span>
             </label>
           </div>

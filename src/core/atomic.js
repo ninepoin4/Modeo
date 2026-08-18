@@ -12,14 +12,23 @@ export function atomicWriteFileSync(file, data) {
   fs.mkdirSync(dir, { recursive: true });
   const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
   fs.writeFileSync(tmp, data);
-  try {
-    fs.renameSync(tmp, file);
-  } catch (err) {
+  // Windows 上 rename 偶发 EPERM（antimalware/杀软短锁临时文件）——短延迟重试消除偶发失败
+  for (let attempt = 0; ; attempt++) {
     try {
-      fs.unlinkSync(tmp);
-    } catch {
-      /* ignore */
+      fs.renameSync(tmp, file);
+      return;
+    } catch (err) {
+      if (attempt < 3 && err.code === 'EPERM' && typeof Atomics.wait === 'function') {
+        const sab = new Int32Array(new SharedArrayBuffer(4));
+        Atomics.wait(sab, 0, 0, 30);
+        continue;
+      }
+      try {
+        fs.unlinkSync(tmp);
+      } catch {
+        /* ignore */
+      }
+      throw err;
     }
-    throw err;
   }
 }

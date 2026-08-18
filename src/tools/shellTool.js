@@ -1,8 +1,11 @@
 /**
  * shell 工具：在工作区内执行命令，危险命令需审批。
+ * background=true 时立即返回并托管为后台任务（process_read/process_kill 管理）；
+ * 前台命令超时自动转后台（长驻进程如 dev server 不丢失）。
  */
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { startJob, detachJob } from './processManager.js';
 
 const MAX_OUTPUT = 64 * 1024;
 
@@ -210,6 +213,20 @@ export function createShellTool(workspaceRoot) {
         };
       }
 
+      // 2026-08-18 长驻终端：background=true 托管为后台任务，立即返回
+      if (args.background === true) {
+        try {
+          const job = startJob(ctx.session?.id, command, path.resolve(workspaceRoot), ctx.env || {});
+          return {
+            output: `[后台任务已启动] id=${job.id} pid=${job.pid}\n命令: ${command}\n用 process_read 读取输出、process_kill 终止、process_list 查看全部任务。`,
+            isError: false,
+            backgroundId: job.id,
+          };
+        } catch (e) {
+          return { output: `错误: ${e.message}`, isError: true };
+        }
+      }
+
       return new Promise((resolve) => {
         const opts = {
           cwd: path.resolve(workspaceRoot),
@@ -224,9 +241,23 @@ export function createShellTool(workspaceRoot) {
         }
         let out = '';
         let timedOut = false;
+        let detached = false;
         const timer = setTimeout(() => {
           timedOut = true;
-          killTree(child);
+          // 2026-08-18 长驻终端：超时不再杀进程，自动转后台（dev server 类长驻进程不丢失）
+          let jobId = null;
+          try {
+            const job = detachJob(ctx.session?.id, command, child, out);
+            jobId = job.id;
+            detached = true;
+          } catch (e) {
+            killTree(child);
+          }
+          resolve({
+            output: `${out}\n[命令超过 ${timeoutMs}ms${jobId ? `，已转后台任务 ${jobId}——进程继续运行，用 process_read ${jobId} 读取后续输出` : '，进程表满已终止'}]`,
+            isError: false,
+            backgroundId: jobId,
+          });
         }, timeoutMs);
 
         child.stdout.on('data', (d) => {
@@ -243,6 +274,7 @@ export function createShellTool(workspaceRoot) {
         });
         child.on('close', (code) => {
           clearTimeout(timer);
+          if (detached) return; // 已转后台任务，由进程表接管
           const done = ctx.forceApproved || ctx.aggressive ? false : needsApproval;
           if (timedOut) {
             resolve({ output: `${out}\n[命令超时，已终止]`, isError: true, exitCode: null, needsApproval: done });

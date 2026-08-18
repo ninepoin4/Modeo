@@ -129,7 +129,7 @@ export function createRunTestsTool(workspaceRoot, shellTool) {
               { ...ctx, forceApproved: ctx.forceApproved === true }
             );
       return {
-        output: `测试命令：${detected.label}\n${result.output}`,
+        output: `测试命令：${detected.label}\n${result.output}${result.isError ? '\n\n⚠ 测试失败——请分析失败原因，修复代码后重新运行 run_tests，直到全部通过再汇报。' : ''}`,
         isError: result.isError,
         needsApproval: false,
       };
