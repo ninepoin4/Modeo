@@ -1,8 +1,0 @@
-{"ts":"2026-08-18T03:06:48.943Z","type":"user_message","messageId":"2459d4a4-b6cd-49c2-bbca-915fe8304ca2","content":"你好"}
-{"ts":"2026-08-18T03:06:57.328Z","type":"done","messageId":"7144d6f9-d93c-445d-973e-902dfa021493"}
-{"ts":"2026-08-18T03:09:30.464Z","type":"user_message","messageId":"9c30669f-6ddd-45e2-855c-06918e90ca38","content":"list files"}
-{"ts":"2026-08-18T03:09:34.578Z","type":"tool_call","toolCall":{"id":"call_7dc83c21893549d9b5406dba","name":"list_dir","args":{"path":"."}}}
-{"ts":"2026-08-18T03:09:34.580Z","type":"tool_result","toolCall":{"id":"call_7dc83c21893549d9b5406dba","name":"list_dir","args":{"path":"."}},"result":{"output":"[file] .gitkeep","isError":false}}
-{"ts":"2026-08-18T03:09:39.572Z","type":"done","messageId":"3947472a-eaaf-4303-8feb-d7d0fa77c8dc"}
-{"ts":"2026-08-18T03:09:39.581Z","type":"user_message","messageId":"14d10838-f994-464c-9e89-5c6a03ed1d94","content":"write file"}
-{"ts":"2026-08-18T03:09:45.793Z","type":"done","messageId":"b8c49198-9495-4942-917b-53a7c3ef01a2"}

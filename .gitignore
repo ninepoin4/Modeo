@@ -5,10 +5,6 @@ desktop/release/
 desktop/dist/
 workspaces/*/
 !workspaces/default/.gitkeep
-data/sessions/
-data/checkpoints/
-data/baselines/
-data/harness/
-data/*.json
+data/
 *.log
 .DS_Store
