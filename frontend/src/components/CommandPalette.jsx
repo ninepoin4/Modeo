@@ -35,7 +35,7 @@ export default function CommandPalette({ open, onClose, commands }) {
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-[70] bg-ink/20 backdrop-blur-[2px] animate-fade-in" />
         <DialogPrimitive.Content
-          className="fixed left-1/2 top-[18vh] z-[70] w-[min(560px,92vw)] -translate-x-1/2 overflow-hidden rounded-2xl border border-line bg-paper shadow-lift animate-scale-in focus:outline-none"
+          className="fixed left-1/2 top-[18vh] z-[70] w-[min(560px,92vw)] -translate-x-1/2 overflow-hidden rounded-2xl border border-line bg-paper shadow-lift animate-dialog-pop focus:outline-none"
         >
           <div className="flex items-center gap-2.5 border-b border-line px-4">
             <Search className="h-4 w-4 shrink-0 text-muted" />

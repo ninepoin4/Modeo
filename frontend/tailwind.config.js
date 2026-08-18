@@ -42,6 +42,11 @@ export default {
           '0%': { opacity: '0', transform: 'scale(0.96)' },
           '100%': { opacity: '1', transform: 'scale(1)' },
         },
+        // 居中弹窗专用：保留 translate(-50%,-50%)，避免被 scale(1) 动画覆盖后弹窗偏移（2026-08-18）
+        'dialog-pop': {
+          '0%': { opacity: '0', transform: 'translate(-50%, -50%) scale(0.96)' },
+          '100%': { opacity: '1', transform: 'translate(-50%, -50%) scale(1)' },
+        },
         shimmer: {
           '0%': { backgroundPosition: '-200% 0' },
           '100%': { backgroundPosition: '200% 0' },
@@ -55,6 +60,7 @@ export default {
         'fade-up': 'fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both',
         'fade-in': 'fade-in 0.25s ease-out both',
         'scale-in': 'scale-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'dialog-pop': 'dialog-pop 0.22s cubic-bezier(0.22, 1, 0.36, 1) both',
         shimmer: 'shimmer 1.6s linear infinite',
         blink: 'blink 1.1s steps(1) infinite',
       },
